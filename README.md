@@ -1,15 +1,22 @@
 # Vellurix
 
-Vellurix is an offline-first Android reader for EPUB, PDF, TXT, HTML, FB2, and basic RTF files. It includes a responsive library, user-created shelves, folder scanning, reading themes, text and font controls, and resizable book and shelf home-screen widgets.
+An offline-first Android reader for EPUB, PDF, TXT, HTML, FB2, and basic RTF. It includes a responsive library, customizable reading themes, and resizable book and shelf widgets.
 
-The app is built with Kotlin, Jetpack Compose, and Readium. Its layouts adapt to available screen size, including foldable phones.
+## Download
 
-## Build
+**[Download Vellurix 0.1.0 for Android](https://github.com/nmohith22/Vellurix/raw/refs/heads/main/release/Vellurix-0.1.0.apk)**
 
-Open this project in Android Studio with JDK 17 and Android SDK 36, or run `gradlew.bat testDebugUnitTest` on Windows. Build an installable debug APK with `gradlew.bat assembleDebug`.
+Download the APK on your Android device, open it from Downloads, and follow Android's install prompt. Android may ask you to allow your browser or file manager to install apps from that source.
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for implementation status, known limitations, and remaining device checks.
+## Features
+
+- Read EPUB, PDF, TXT, HTML, FB2, and basic RTF files.
+- Choose paper, white, sepia, night, forest, slate, or a custom reading color.
+- Adjust text size and font; restore an EPUB's publisher font with **Publisher default**.
+- Choose no transition, fade, slide, or page-turn animation.
+- Scan a folder when requested, create shelves, and add book or shelf widgets to the home screen.
+- Adapts to phones and foldable displays.
 
 ## License
 
-Vellurix is licensed under Apache-2.0. See [LICENSE](LICENSE).
+Vellurix is licensed under Apache-2.0. See [LICENSE](LICENSE). See [DEVELOPMENT.md](DEVELOPMENT.md) for implementation status and known limitations.

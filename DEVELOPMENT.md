@@ -1,6 +1,6 @@
 # Vellurix Development Tracker
 
-**Status:** Core reader and library implemented; unit tests pass. Debug APK packaging still needs a dependency download that has timed out in this environment.  
+**Status:** Core reader and library implemented; tests pass and an installable release APK is available in `release/`.
 **Updated:** 2026-10-03
 
 ## Product scope
@@ -28,7 +28,8 @@ Vellurix is an offline-first Android reader for phones and foldables. The interf
 
 ### Reader behavior and accessibility
 
-- [ ] Verify page transitions and gestures on device; current animation modes are wired to Previous/Next controls.
+- [x] Implement none, fade, slide, and page-turn transitions for EPUB, PDF, and flowing-text reader controls.
+- [ ] Verify page transitions and gestures on phones and foldables.
 - [ ] Apply and verify appearance settings on PDF pages and fixed-layout publications.
 - [ ] Let users set foreground and background colors independently and preview the result.
 - [ ] Bundle and license additional font files; keep publisher default easy to restore.
@@ -48,7 +49,9 @@ Vellurix is an offline-first Android reader for phones and foldables. The interf
 - [ ] Add fold posture/window information handling and inspect layouts on cover and inner displays.
 - [ ] Validate library, reader, animations, and widgets on a small phone, large phone, and Samsung foldable. No connected device is available in the current environment.
 - [ ] Profile large EPUB/PDF files, rotation, process recreation, and memory use.
-- [ ] Add a launcher icon, review the file-access disclosure, and configure release signing.
+- [x] Add a Vellurix book launcher icon for adaptive and legacy launchers.
+- [ ] Review the file-access disclosure and configure production release signing.
+- [x] Publish a signed, installable APK in `release/` and link it from the README.
 - [ ] Install and exercise a release build on a Samsung foldable and a conventional phone.
 
 ## Decisions and known limits
@@ -58,8 +61,9 @@ Vellurix is an offline-first Android reader for phones and foldables. The interf
 - **Format policy:** Accepted extensions are `.epub`, `.pdf`, `.txt`, `.html`, `.htm`, `.fb2`, and `.rtf`. Only formats with a real open path are listed as supported.
 - **Folder behavior:** Scans are explicit and non-destructive. Removed books remain excluded from later scans until the exclusion is cleared. Source files are never deleted.
 - **Widgets:** Android app widgets support launcher-controlled horizontal and vertical resizing. Their current artwork is generated from title and format; embedded cover extraction remains open.
-- **Build:** JDK 17, Android SDK 36, Gradle wrapper 8.13, AGP 8.13.1, Kotlin/Compose 2.3.20, min SDK 24. The unit test task passed after the reader and widget implementation. A post-fix rerun could not finish because the fresh Gradle distribution download was interrupted; widget provider class references and app theme links were checked. `assembleDebug` has been blocked by a timeout downloading `desugar_jdk_libs:2.1.5` from Google Maven; an alternate public mirror also did not respond.
-- **Repository:** Project folder is `Development/Vellurix`; changes are pushed to `https://github.com/nmohith22/Vellurix` on `main`. The GitHub description is “Offline-first Android EPUB and PDF reader with customizable themes, responsive shelves, and resizable book widgets.”
+- **Build:** JDK 17, Android SDK 36, Gradle wrapper 8.13, AGP 8.13.1, Kotlin/Compose 2.3.20, min SDK 24. `testDebugUnitTest` and `assembleRelease` completed successfully. D8 emitted Kotlin metadata compatibility warnings for Readium dependencies, but produced the APK. `release/Vellurix-0.1.0.apk` is aligned, signed, and verified; the local signing key is excluded from Git. Production signing setup and device installation checks remain open.
+- **Repository:** Project folder is `Development/Vellurix`; changes are pushed to `https://github.com/nmohith22/Vellurix` on `main`. The GitHub description is "Offline-first Android EPUB and PDF reader with customizable themes, responsive shelves, and resizable book widgets."
+- **Transitions:** None uses direct navigation, fade and slide animate the reader surface, and page-turn uses Readium navigation for EPUB/PDF plus smooth page-sized scrolling for text formats.
 - **License:** Project code is licensed under Apache-2.0. Readium Kotlin Toolkit is BSD-3-Clause; dependency notices should be reviewed as dependencies are finalized.
 
 ## References

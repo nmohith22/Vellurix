@@ -6,6 +6,10 @@ build/
 app/build/
 local.properties
 *.apk
+*.idsig
+!release/*.apk
+release/.keys/
+release/.signing.properties
 .idea/
 captures/
 .DS_Store

@@ -171,24 +171,36 @@ private class ReaderHostFragment : Fragment() {
     }
 
     fun turnPage(forward: Boolean) {
-        val navView = (childFragmentManager.findFragmentByTag("publication_reader") as? Fragment)?.view
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
-        if (format in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) {
-            val scroll = (view as? FrameLayout)?.getChildAt(0) as? ScrollView ?: return
-            scroll.smoothScrollBy(0, (if (forward) 1 else -1) * (scroll.height * .82f).toInt())
-            return
-        }
         val prefs = requireContext().getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        val animated = prefs.getString("page_transition", "page turn") == "page turn"
+        val mode = prefs.getString("page_transition", "page turn") ?: "page turn"
+        val navView = (childFragmentManager.findFragmentByTag("publication_reader") as? Fragment)?.view ?: view
+        val scroll = (view as? FrameLayout)?.getChildAt(0) as? ScrollView
+        val isText = format in setOf("TXT", "HTML", "HTM", "FB2", "RTF")
         val go: () -> Unit = {
-            if (format == "PDF") (childFragmentManager.findFragmentByTag("publication_reader") as? PdfNavigatorFragment<*, *>)?.let { if (forward) it.goForward(false) else it.goBackward(false) }
-            else (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.let { if (forward) it.goForward(animated) else it.goBackward(animated) }
+            if (isText) {
+                scroll?.let {
+                    val distance = (it.height * .82f).toInt() * if (forward) 1 else -1
+                    if (mode == "page turn") it.smoothScrollBy(0, distance) else it.scrollBy(0, distance)
+                }
+            } else if (format == "PDF") {
+                (childFragmentManager.findFragmentByTag("publication_reader") as? PdfNavigatorFragment<*, *>)?.let { if (forward) it.goForward(mode == "page turn") else it.goBackward(mode == "page turn") }
+            } else {
+                (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.let { if (forward) it.goForward(mode == "page turn") else it.goBackward(mode == "page turn") }
+            }
         }
-        when (prefs.getString("page_transition", "page turn")) {
-            "fade" -> navView?.animate()?.alpha(.12f)?.setDuration(100)?.withEndAction { go(); navView.animate().alpha(1f).setDuration(160).start() }?.start() ?: go()
+        when (mode) {
+            "fade" -> navView?.let { target ->
+                target.animate().cancel()
+                target.animate().alpha(.12f).setDuration(100).withEndAction { go(); target.animate().alpha(1f).setDuration(160).start() }.start()
+            } ?: go()
             "slide" -> {
-                val distance = (navView?.width ?: return) * .16f * if (forward) -1 else 1
-                navView.animate().translationX(distance).alpha(.65f).setDuration(110).withEndAction { go(); navView.translationX = -distance; navView.animate().translationX(0f).alpha(1f).setDuration(160).start() }.start()
+                val target = navView
+                if (target == null || target.width == 0) go() else {
+                    target.animate().cancel()
+                    val distance = target.width * .16f * if (forward) -1 else 1
+                    target.animate().translationX(distance).alpha(.65f).setDuration(110).withEndAction { go(); target.translationX = -distance; target.animate().translationX(0f).alpha(1f).setDuration(160).start() }.start()
+                }
             }
             else -> go()
         }
