@@ -9,13 +9,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoStories
@@ -24,17 +26,21 @@ import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,22 +61,25 @@ private val CoverColors = listOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private var resumeTick by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(246, 243, 238)
         window.navigationBarColor = android.graphics.Color.rgb(246, 243, 238)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        setContent { FolioApp() }
+        setContent { FolioApp(resumeTick) }
     }
 
     override fun onResume() {
         super.onResume()
         refreshHomeWidgets(this)
+        resumeTick++
     }
 }
 
-private data class BookItem(val uri: String, val title: String, val format: String, val shelf: String = "All books")
+private data class BookItem(override val uri: String, override val title: String, override val format: String, val shelf: String = "All books") : CoverBookInfo
 private val supportedExtensions = setOf("epub", "pdf", "txt", "html", "htm", "fb2", "rtf")
 internal fun fileFormat(name: String): String? = name.substringAfterLast('.', "").lowercase().takeIf(supportedExtensions::contains)
 
@@ -90,7 +99,7 @@ private class LibraryStore(context: android.content.Context) {
 }
 
 @Composable
-private fun FolioApp() {
+private fun FolioApp(resumeTick: Int) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { LibraryStore(context.applicationContext) }
     val books = remember { mutableStateListOf<BookItem>().apply { addAll(store.books()) } }
@@ -102,11 +111,38 @@ private fun FolioApp() {
     var hiddenDialog by remember { mutableStateOf(false) }
     var shelfName by remember { mutableStateOf("") }
     var selectedBook by remember { mutableStateOf<BookItem?>(null) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    val settings = remember { context.getSharedPreferences("library_settings", android.content.Context.MODE_PRIVATE) }
+    val readerSettings = remember { context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE) }
+    var layoutMode by rememberSaveable { mutableStateOf(settings.getString("layout", "cards") ?: "cards") }
+    var cardSize by rememberSaveable { mutableFloatStateOf(settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)) }
+    var appTheme by rememberSaveable { mutableStateOf(settings.getString("app_theme", "paper") ?: "paper") }
+    var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
+    var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
+    var readerFontScale by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("font_scale", 1f)) }
+    var fontDialog by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(resumeTick) {
+        if (resumeTick > 0) {
+            layoutMode = settings.getString("layout", "cards") ?: "cards"
+            cardSize = settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)
+            appTheme = settings.getString("app_theme", "paper") ?: "paper"
+            readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
+            readerFont = readerSettings.getString("font_family", "") ?: ""
+            readerFontScale = readerSettings.getFloat("font_scale", 1f)
+        }
+    }
     fun saveBooks() {
         store.saveBooks(books.toList())
         refreshHomeWidgets(context.applicationContext)
+    }
+    fun openBook(book: BookItem) {
+        context.startActivity(Intent(context, ReaderActivity::class.java).apply {
+            putExtra(ReaderActivity.EXTRA_URI, book.uri)
+            putExtra(ReaderActivity.EXTRA_TITLE, book.title)
+            putExtra(ReaderActivity.EXTRA_FORMAT, book.format)
+        })
     }
 
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -161,16 +197,33 @@ private fun FolioApp() {
             }
         }
     }
-    MaterialTheme(colorScheme = lightColorScheme(primary = Accent, background = Canvas, surface = Color.White, onSurface = Ink, onBackground = Ink)) {
-        Column(Modifier.fillMaxSize().background(Canvas)) {
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 22.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+    val appColors = when (appTheme) {
+        "dark" -> Triple(Color(0xFF17191C), Color(0xFF222529), Color(0xFFE4E6E8))
+        "sepia" -> Triple(Color(0xFFF0E5D1), Color(0xFFF8F1E4), Color(0xFF493B2D))
+        else -> Triple(Canvas, Color.White, Ink)
+    }
+    val hostActivity = context as? android.app.Activity
+    SideEffect {
+        hostActivity?.window?.apply {
+            statusBarColor = appColors.first.toArgb()
+            navigationBarColor = appColors.first.toArgb()
+            @Suppress("DEPRECATION")
+            decorView.systemUiVisibility = if (appTheme == "dark") 0 else android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+    }
+    val appColorScheme = if (appTheme == "dark") darkColorScheme(primary = Color(0xFFE0A08A), background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
+        else lightColorScheme(primary = Accent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
+    MaterialTheme(colorScheme = appColorScheme) {
+        Column(Modifier.fillMaxSize().background(appColors.first).windowInsetsPadding(WindowInsets.systemBars)) {
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 10.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("VELLURIX", style = MaterialTheme.typography.labelLarge, color = Accent, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
-                    Text("Your library", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold)
+                    Text("Your library", style = MaterialTheme.typography.headlineMedium, color = appColors.third, fontWeight = FontWeight.SemiBold)
                 }
                 Row {
-                    IconButton(onClick = { shelfDialog = true }) { Icon(Icons.Rounded.Add, "Create a shelf", tint = Ink) }
-                    IconButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.FolderOpen, "Import a book", tint = Ink) }
+                    IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Rounded.Settings, "Settings", tint = appColors.third) }
+                    IconButton(onClick = { shelfDialog = true }) { Icon(Icons.Rounded.Add, "Create a shelf", tint = appColors.third) }
+                    IconButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.FolderOpen, "Import a book", tint = appColors.third) }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -203,13 +256,16 @@ private fun FolioApp() {
                     }
                 }
             } else {
-                LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 154.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(visibleBooks, key = { it.uri }) { book ->
-                        BookCard(book, onClick = { selectedBook = book }, onRemove = {
-                            books.remove(book)
-                            store.saveExclusions(store.exclusions() + book.uri)
-                            saveBooks()
-                        })
+                if (layoutMode == "cards") {
+                    LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, onClick = { openBook(book) }, onLongClick = { selectedBook = book }) }
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
+                            val book = visibleBooks[index]
+                            BookRow(book, cardSize, appColors.third, onClick = { openBook(book) }, onLongClick = { selectedBook = book })
+                        }
                     }
                 }
             }
@@ -226,6 +282,76 @@ private fun FolioApp() {
 
     if (hiddenDialog) AlertDialog(onDismissRequest = { hiddenDialog = false }, title = { Text("Hidden from folder scans") }, text = { Text("${store.exclusions().size} removed book(s) will stay out of later scans until you clear this list.") }, confirmButton = { TextButton(onClick = { store.saveExclusions(emptySet()); hiddenDialog = false }) { Text("Clear hidden list") } }, dismissButton = { TextButton(onClick = { hiddenDialog = false }) { Text("Done") } })
 
+    if (settingsOpen) {
+        AlertDialog(
+            onDismissRequest = { settingsOpen = false },
+            title = { Text("Settings") },
+            text = {
+                Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Library view", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = layoutMode == "cards", onClick = { layoutMode = "cards"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("Cards") })
+                        FilterChip(selected = layoutMode == "list", onClick = { layoutMode = "list"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("List") })
+                    }
+                    Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
+                    Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
+                    Text("App theme", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("paper" to "Paper", "sepia" to "Sepia", "dark" to "Dark").forEach { (key, label) ->
+                            FilterChip(selected = appTheme == key, onClick = { appTheme = key; settings.edit().putString("app_theme", key).apply() }, label = { Text(label) })
+                        }
+                    }
+                    Text("Global reader theme", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night").forEach { (key, label) ->
+                            FilterChip(selected = readerTheme == key, onClick = {
+                                readerTheme = key
+                                val (background, foreground) = when (key) {
+                                    "white" -> android.graphics.Color.WHITE to android.graphics.Color.rgb(35,35,35)
+                                    "sepia" -> android.graphics.Color.rgb(244,232,207) to android.graphics.Color.rgb(71,55,39)
+                                    "night" -> android.graphics.Color.rgb(14,16,19) to android.graphics.Color.rgb(211,215,219)
+                                    else -> android.graphics.Color.rgb(250,249,246) to android.graphics.Color.rgb(43,42,39)
+                                }
+                                context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putString("theme", key).putInt("background", background).putInt("foreground", foreground).apply()
+                                settings.edit().putString("reader_theme", key).apply()
+                            }, label = { Text(label) })
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Column {
+                            Text("Reading font", style = MaterialTheme.typography.titleSmall)
+                            Text(if (readerFont.isBlank()) "Publisher default" else readerFont, style = MaterialTheme.typography.bodySmall, color = Muted)
+                        }
+                        TextButton(onClick = { fontDialog = true }) { Text("Choose") }
+                    }
+                    Text("Text size · ${(readerFontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                    Slider(value = readerFontScale, onValueChange = { readerFontScale = it }, valueRange = .8f..1.8f, onValueChangeFinished = {
+                        context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("font_scale", readerFontScale).apply()
+                    })
+                    Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                }
+            },
+            confirmButton = { TextButton(onClick = { settingsOpen = false }) { Text("Done") } },
+        )
+    }
+
+    if (fontDialog) {
+        val fonts = listOf("" to "Publisher default", "serif" to "Serif", "sans-serif" to "Sans serif", "cursive" to "Cursive", "fantasy" to "Fantasy", "monospace" to "Monospace", "OpenDyslexic" to "OpenDyslexic", "AccessibleDfA" to "Accessible DfA", "iA Writer Duospace" to "iA Writer Duospace")
+        AlertDialog(onDismissRequest = { fontDialog = false }, title = { Text("Global reading font") }, text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                fonts.forEach { (value, label) ->
+                    TextButton(onClick = {
+                        readerFont = value
+                        context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putString("font_family", value).apply()
+                        fontDialog = false
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (readerFont == value) "●  $label" else label, modifier = Modifier.fillMaxWidth(), color = appColors.third)
+                    }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { fontDialog = false }) { Text("Done") } })
+    }
+
     selectedBook?.let { book ->
         AlertDialog(
             onDismissRequest = { selectedBook = null },
@@ -233,7 +359,7 @@ private fun FolioApp() {
             title = { Text(book.title) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${book.format} · Save to shelf")
+                    Text("${book.format} · Add to shelf")
                     shelves.forEach { shelf ->
                         TextButton(onClick = {
                             val index = books.indexOfFirst { it.uri == book.uri }
@@ -244,16 +370,8 @@ private fun FolioApp() {
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    context.startActivity(android.content.Intent(context, ReaderActivity::class.java).apply {
-                        putExtra(ReaderActivity.EXTRA_URI, book.uri)
-                        putExtra(ReaderActivity.EXTRA_TITLE, book.title)
-                        putExtra(ReaderActivity.EXTRA_FORMAT, book.format)
-                    })
-                    selectedBook = null
-                }) { Text("Open book") }
-            },
+            confirmButton = { TextButton(onClick = { books.remove(book); store.saveExclusions(store.exclusions() + book.uri); saveBooks(); selectedBook = null }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Remove") } },
+            dismissButton = { TextButton(onClick = { selectedBook = null }) { Text("Done") } },
         )
     }
 }
@@ -274,21 +392,36 @@ private suspend fun scanFolder(context: android.content.Context, uri: Uri): List
     found
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookItem, onClick: () -> Unit, onRemove: () -> Unit) {
+private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
-    Card(onClick = onClick, shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
-        Column(Modifier.padding(10.dp)) {
-            Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second))).padding(18.dp)) {
-                Column(Modifier.align(Alignment.CenterStart), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(width = 28.dp, height = 2.dp).background(Color.White.copy(alpha = .65f)))
+    Card(modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+        Column(Modifier.padding((10 * size).dp)) {
+            Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second)))) {
+                BookCover(book, Modifier.fillMaxSize())
+                Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.82f)))).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(book.title, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                    Text(book.format, color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.4.sp)
+                    Text(book.format, color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.4.sp)
                 }
-                IconButton(onClick = onRemove, modifier = Modifier.align(Alignment.TopEnd).size(32.dp).background(Color.Black.copy(alpha = .14f), CircleShape)) { Icon(Icons.Rounded.DeleteOutline, "Remove from library", tint = Color.White, modifier = Modifier.size(18.dp)) }
             }
-            Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().height((94 * size).dp).combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxSize().padding(10.dp)) {
+            Box(Modifier.width((54 * size).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Accent)) { BookCover(book, Modifier.fillMaxSize()) }
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.Rounded.AutoStories, "Open ${book.title}", tint = Accent)
         }
     }
 }

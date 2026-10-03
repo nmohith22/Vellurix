@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.MotionEvent
+import android.os.Build
+import android.view.WindowInsets
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.SweepGradient
@@ -92,6 +94,7 @@ class ReaderActivity : FragmentActivity() {
         pageBar.addView(Button(this).apply { text = "Next ›"; setOnClickListener { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.turnPage(true) } })
         root.addView(pageBar, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         setContentView(root)
+        enterImmersiveReader()
         refreshRotation()
         if (savedInstanceState == null) {
             supportFragmentManager.commit { replace(containerId, ReaderHostFragment.create(uri.toString(), intent.getStringExtra(EXTRA_FORMAT).orEmpty())) }
@@ -166,6 +169,23 @@ class ReaderActivity : FragmentActivity() {
             dialog.setMessage("PDF page appearance is controlled by the document. Theme and font settings apply to EPUB and flowing text.")
         }
         dialog.show()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enterImmersiveReader()
+    }
+
+    private fun enterImmersiveReader() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.insetsController?.let { controller ->
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+        }
     }
 
     private fun scopedAppearancePreferences() = getSharedPreferences(
