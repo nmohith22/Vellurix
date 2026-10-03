@@ -58,6 +58,7 @@ private const val READER_CONTENT_ID = 0x00F01102
 class ReaderActivity : FragmentActivity() {
     private var containerId = View.NO_ID
     private var autoRotate = true
+    private var customizeThisBook = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +66,7 @@ class ReaderActivity : FragmentActivity() {
         if (uri == null) { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Reading"
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
+        customizeThisBook = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("customize_this_book", false)
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(14, 8, 14, 8); setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
@@ -102,23 +104,47 @@ class ReaderActivity : FragmentActivity() {
     }
 
     private fun openAppearanceSettings() {
-        val prefs = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
+        val prefs = scopedAppearancePreferences()
+        val prefix = scopedAppearanceKey("")
         val themes = arrayOf("Paper", "White", "Sepia", "Night", "Forest", "Slate", "Custom color wheel")
-        AlertDialog.Builder(this).setTitle("Reading theme").setItems(themes) { _, which ->
+        val items = arrayOf(if (customizeThisBook) "Edit global appearance" else "Customize this book only", *themes) +
+            if (customizeThisBook) arrayOf("Reset this book to global defaults") else emptyArray()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (customizeThisBook) "This book's appearance" else "Global reading appearance")
+            .setItems(items) { _, which ->
+            if (which == 0) {
+                customizeThisBook = !customizeThisBook
+                getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putBoolean("customize_this_book", customizeThisBook).apply()
+                openAppearanceSettings()
+                return@setItems
+            }
+            val themeIndex = which - 1
+            if (themeIndex == themes.size) {
+                val bookPrefs = getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
+                val bookPrefix = scopedAppearanceKey("")
+                val editor = bookPrefs.edit()
+                listOf("theme", "background", "foreground", "font_family", "font_scale").forEach { editor.remove(bookPrefix + it) }
+                editor.apply()
+                applyAppearance()
+                return@setItems
+            }
             val e = prefs.edit()
-            when (which) {
-                0 -> e.putString("theme", "paper").putInt("background", AndroidColor.rgb(250,249,246)).putInt("foreground", AndroidColor.rgb(43,42,39))
-                1 -> e.putString("theme", "white").putInt("background", AndroidColor.WHITE).putInt("foreground", AndroidColor.rgb(35,35,35))
-                2 -> e.putString("theme", "sepia").putInt("background", AndroidColor.rgb(244,232,207)).putInt("foreground", AndroidColor.rgb(71,55,39))
-                3 -> e.putString("theme", "night").putInt("background", AndroidColor.rgb(14,16,19)).putInt("foreground", AndroidColor.rgb(211,215,219))
-                4 -> e.putString("theme", "forest").putInt("background", AndroidColor.rgb(22,35,27)).putInt("foreground", AndroidColor.rgb(218,229,218))
-                5 -> e.putString("theme", "slate").putInt("background", AndroidColor.rgb(30,38,49)).putInt("foreground", AndroidColor.rgb(220,226,235))
+            val themeKey = prefix + "theme"
+            val backgroundKey = prefix + "background"
+            val foregroundKey = prefix + "foreground"
+            when (themeIndex) {
+                0 -> e.putString(themeKey, "paper").putInt(backgroundKey, AndroidColor.rgb(250,249,246)).putInt(foregroundKey, AndroidColor.rgb(43,42,39))
+                1 -> e.putString(themeKey, "white").putInt(backgroundKey, AndroidColor.WHITE).putInt(foregroundKey, AndroidColor.rgb(35,35,35))
+                2 -> e.putString(themeKey, "sepia").putInt(backgroundKey, AndroidColor.rgb(244,232,207)).putInt(foregroundKey, AndroidColor.rgb(71,55,39))
+                3 -> e.putString(themeKey, "night").putInt(backgroundKey, AndroidColor.rgb(14,16,19)).putInt(foregroundKey, AndroidColor.rgb(211,215,219))
+                4 -> e.putString(themeKey, "forest").putInt(backgroundKey, AndroidColor.rgb(22,35,27)).putInt(foregroundKey, AndroidColor.rgb(218,229,218))
+                5 -> e.putString(themeKey, "slate").putInt(backgroundKey, AndroidColor.rgb(30,38,49)).putInt(foregroundKey, AndroidColor.rgb(220,226,235))
                 6 -> { showColorWheel(); return@setItems }
             }
             e.apply(); applyAppearance()
         }.setNeutralButton("Text size") { _, _ ->
             val sizes = (9..20).map { "${it * 10}%" }.toTypedArray()
-            AlertDialog.Builder(this).setTitle("Text size").setSingleChoiceItems(sizes, ((prefs.getFloat("font_scale",1f)*10)-9).toInt().coerceIn(0,11)) { d, i -> prefs.edit().putFloat("font_scale", .9f + i*.1f).apply(); d.dismiss(); applyAppearance() }.setNegativeButton("Close", null).show()
+            AlertDialog.Builder(this).setTitle("Text size").setSingleChoiceItems(sizes, ((scopedAppearanceFloat("font_scale", 1f)*10)-9).toInt().coerceIn(0,11)) { d, i -> prefs.edit().putFloat(prefix + "font_scale", .9f + i*.1f).apply(); d.dismiss(); applyAppearance() }.setNegativeButton("Close", null).show()
         }.setPositiveButton("Fonts") { _, _ ->
             val format = intent.getStringExtra(EXTRA_FORMAT).orEmpty()
             if (format == "PDF") {
@@ -129,18 +155,36 @@ class ReaderActivity : FragmentActivity() {
                 else arrayOf("Default", "Serif", "Sans serif", "Cursive", "Fantasy", "Monospace")
             val values = if (format == "EPUB") arrayOf("", "serif", "sans-serif", "cursive", "fantasy", "monospace", "OpenDyslexic", "AccessibleDfA", "iA Writer Duospace")
                 else arrayOf("", "serif", "sans-serif", "cursive", "fantasy", "monospace")
-            AlertDialog.Builder(this).setTitle("Reading font").setItems(labels) { _, i -> prefs.edit().putString("font_family", values[i]).apply(); applyAppearance() }.show()
+            AlertDialog.Builder(this).setTitle("Reading font").setItems(labels) { _, i -> prefs.edit().putString(prefix + "font_family", values[i]).apply(); applyAppearance() }.show()
         }.setNegativeButton("Transitions") { _, _ ->
             val modes = arrayOf("None", "Fade", "Slide", "Page turn")
-            val current = prefs.getString("page_transition", "page turn")
-            AlertDialog.Builder(this).setTitle("Page turn animation").setSingleChoiceItems(modes, modes.indexOfFirst { it.equals(current, true) }.coerceAtLeast(0)) { dialog, which -> prefs.edit().putString("page_transition", modes[which].lowercase()).apply(); dialog.dismiss() }.setNegativeButton("Close", null).show()
-        }.show()
+            val globalPrefs = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
+            val current = globalPrefs.getString("page_transition", "page turn")
+            AlertDialog.Builder(this).setTitle("Page turn animation").setSingleChoiceItems(modes, modes.indexOfFirst { it.equals(current, true) }.coerceAtLeast(0)) { dialog, which -> globalPrefs.edit().putString("page_transition", modes[which].lowercase()).apply(); dialog.dismiss() }.setNegativeButton("Close", null).show()
+        }
+        if (intent.getStringExtra(EXTRA_FORMAT).orEmpty() == "PDF") {
+            dialog.setMessage("PDF page appearance is controlled by the document. Theme and font settings apply to EPUB and flowing text.")
+        }
+        dialog.show()
+    }
+
+    private fun scopedAppearancePreferences() = getSharedPreferences(
+        if (customizeThisBook) "reader_book_appearance" else "reader_settings",
+        android.content.Context.MODE_PRIVATE,
+    )
+
+    private fun scopedAppearanceKey(key: String) =
+        (if (customizeThisBook) "${intent.getStringExtra(EXTRA_URI).orEmpty()}|" else "") + key
+
+    private fun scopedAppearanceFloat(key: String, default: Float): Float {
+        val global = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
+        return if (customizeThisBook) scopedAppearancePreferences().getFloat(scopedAppearanceKey(key), global.getFloat(key, default)) else global.getFloat(key, default)
     }
 
     private fun showColorWheel() {
-        val prefs = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        var background = prefs.getInt("background", AndroidColor.rgb(64,96,128))
-        var foreground = prefs.getInt("foreground", AndroidColor.rgb(30,30,30))
+        val current = if (customizeThisBook) loadReaderAppearance(this, intent.getStringExtra(EXTRA_URI).orEmpty()) else loadGlobalReaderAppearance(this)
+        var background = current.background
+        var foreground = current.foreground
         var editForeground = false
         val preview = TextView(this).apply { text = "Vellurix reading preview"; textSize = 20f; gravity = Gravity.CENTER; setPadding(10, 12, 10, 12) }
         fun updatePreview() { preview.setBackgroundColor(background); preview.setTextColor(foreground) }
@@ -161,7 +205,11 @@ class ReaderActivity : FragmentActivity() {
             addView(targetButtons); addView(wheel, LinearLayout.LayoutParams(-1,260))
         }
         AlertDialog.Builder(this).setTitle("Choose a reading color").setView(content).setNegativeButton("Cancel", null).setPositiveButton("Apply") { _, _ ->
-            prefs.edit().putString("theme", "custom").putInt("background", background).putInt("foreground", foreground).apply()
+            scopedAppearancePreferences().edit()
+                .putString(scopedAppearanceKey("theme"), "custom")
+                .putInt(scopedAppearanceKey("background"), background)
+                .putInt(scopedAppearanceKey("foreground"), foreground)
+                .apply()
             applyAppearance()
         }.show()
     }
@@ -181,8 +229,8 @@ private class ReaderHostFragment : Fragment() {
     private var pendingScrollY = 0
 
     fun applyAppearance() {
-        val prefs = requireContext().getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(prefs))
+        val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(appearance))
         if (arguments?.getString(ARG_FORMAT).orEmpty() in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) {
             (view as? FrameLayout)?.removeAllViews()
             onViewCreated(view ?: return, null)
@@ -260,7 +308,7 @@ private class ReaderHostFragment : Fragment() {
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 val factory = if (format == "PDF") PdfNavigatorFactory(publication, PdfiumEngineProvider()).createFragmentFactory(initialLocator = initialLocator)
-                else EpubNavigatorFactory(publication).createFragmentFactory(initialLocator = initialLocator, initialPreferences = readingPreferences(context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)))
+                else EpubNavigatorFactory(publication).createFragmentFactory(initialLocator = initialLocator, initialPreferences = readingPreferences(loadReaderAppearance(context, uri.toString())))
                 childFragmentManager.fragmentFactory = factory
                 childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
                 val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? Navigator
@@ -280,17 +328,17 @@ private class ReaderHostFragment : Fragment() {
 
     private fun showText(text: String) {
         val context = requireContext()
-        val prefs = context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        val palette = Triple(prefs.getInt("background", AndroidColor.rgb(250,249,246)), prefs.getInt("foreground", AndroidColor.rgb(43,42,39)), AndroidColor.WHITE)
+        val key = arguments?.getString(ARG_URI).orEmpty()
+        val appearance = loadReaderAppearance(context, key)
+        val palette = Triple(appearance.background, appearance.foreground, AndroidColor.WHITE)
         val content = TextView(context).apply {
             this.text = text
-            textSize = 18f * prefs.getFloat("font_scale", 1f)
+            textSize = 18f * appearance.fontScale
             setTextColor(palette.second)
-            typeface = prefs.getString("font_family", "")?.takeIf { it.isNotBlank() }?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.DEFAULT
+            typeface = appearance.fontFamily.takeIf { it.isNotBlank() }?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.DEFAULT
             setLineSpacing(8f, 1f)
             setPadding(26, 24, 26, 36)
         }
-        val key = arguments?.getString(ARG_URI).orEmpty()
         val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
         pendingScrollY = progress.getInt(key, 0)
         val scroll = ScrollView(context).apply {
@@ -325,19 +373,46 @@ private class ReaderHostFragment : Fragment() {
     }
 }
 
+internal fun loadReaderAppearance(context: android.content.Context, uri: String): ReaderAppearance {
+    val global = loadGlobalReaderAppearance(context)
+    val bookPrefs = context.getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
+    val prefix = "$uri|"
+    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale").any { bookPrefs.contains(prefix + it) }) {
+        ReaderAppearanceOverrides(
+            theme = if (bookPrefs.contains(prefix + "theme")) bookPrefs.getString(prefix + "theme", null) else null,
+            background = if (bookPrefs.contains(prefix + "background")) bookPrefs.getInt(prefix + "background", global.background) else null,
+            foreground = if (bookPrefs.contains(prefix + "foreground")) bookPrefs.getInt(prefix + "foreground", global.foreground) else null,
+            fontFamily = if (bookPrefs.contains(prefix + "font_family")) bookPrefs.getString(prefix + "font_family", "") else null,
+            fontScale = if (bookPrefs.contains(prefix + "font_scale")) bookPrefs.getFloat(prefix + "font_scale", global.fontScale) else null,
+        )
+    } else null
+    return resolveReaderAppearance(global, overrides)
+}
+
+private fun loadGlobalReaderAppearance(context: android.content.Context): ReaderAppearance {
+    val prefs = context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
+    return ReaderAppearance(
+        theme = prefs.getString("theme", "paper") ?: "paper",
+        background = prefs.getInt("background", AndroidColor.rgb(250,249,246)),
+        foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
+        fontFamily = prefs.getString("font_family", "") ?: "",
+        fontScale = prefs.getFloat("font_scale", 1f),
+    )
+}
+
 internal fun parseSavedLocator(json: String?): org.readium.r2.shared.publication.Locator? =
     json?.let { runCatching { org.readium.r2.shared.publication.Locator.fromJSON(JSONObject(it)) }.getOrNull() }
 
-private fun readingPreferences(prefs: android.content.SharedPreferences) = EpubPreferences(
-    backgroundColor = ReadiumColor(prefs.getInt("background", AndroidColor.rgb(250,249,246))),
-    textColor = ReadiumColor(prefs.getInt("foreground", AndroidColor.rgb(43,42,39))),
-    theme = when (prefs.getString("theme", "paper")) { "sepia" -> Theme.SEPIA; "night", "forest", "slate", "custom" -> Theme.DARK; else -> Theme.LIGHT },
-    fontFamily = when (prefs.getString("font_family", "")) {
+private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
+    backgroundColor = ReadiumColor(appearance.background),
+    textColor = ReadiumColor(appearance.foreground),
+    theme = when (appearance.theme) { "sepia" -> Theme.SEPIA; "night", "forest", "slate", "custom" -> Theme.DARK; else -> Theme.LIGHT },
+    fontFamily = when (appearance.fontFamily) {
         "serif" -> FontFamily.SERIF; "sans-serif" -> FontFamily.SANS_SERIF; "cursive" -> FontFamily.CURSIVE; "fantasy" -> FontFamily.FANTASY; "monospace" -> FontFamily.MONOSPACE
         "OpenDyslexic" -> FontFamily.OPEN_DYSLEXIC; "AccessibleDfA" -> FontFamily.ACCESSIBLE_DFA; "iA Writer Duospace" -> FontFamily.IA_WRITER_DUOSPACE; else -> null
     },
-    fontSize = prefs.getFloat("font_scale", 1f).toDouble(),
-    publisherStyles = prefs.getString("font_family", "").isNullOrEmpty()
+    fontSize = appearance.fontScale.toDouble(),
+    publisherStyles = appearance.fontFamily.isEmpty()
 )
 
 private class HueWheel(context: android.content.Context, private val changed: (Int) -> Unit) : View(context) {
