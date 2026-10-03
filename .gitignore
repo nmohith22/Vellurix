@@ -15,3 +15,7 @@ release/.signing.properties
 .idea/
 captures/
 .DS_Store
+
+# Keep local agent and development notes out of the repository
+AGENTS.md
+DEVELOPMENT.md
