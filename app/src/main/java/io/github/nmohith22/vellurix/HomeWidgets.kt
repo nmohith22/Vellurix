@@ -53,7 +53,7 @@ class WidgetConfigureActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 20, 24, 16) }
         root.addView(TextView(this).apply { text = title; textSize = 22f; setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, 14) })
         if (items.isEmpty()) {
-            root.addView(TextView(this).apply { text = "Add a book to Folio Reader first."; textSize = 16f })
+            root.addView(TextView(this).apply { text = "Add a book to Vellurix first."; textSize = 16f })
             root.addView(Button(this).apply { text = "Open library"; setOnClickListener { startActivity(Intent(this@WidgetConfigureActivity, MainActivity::class.java)); finish() } })
         } else {
             val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -114,8 +114,8 @@ class ShelfWidgetProvider : AppWidgetProvider() {
             val allBooks = WidgetLibrary.books(context)
             val books = if (shelf == "All books") allBooks else allBooks.filter { it.shelf == shelf }
             val options = manager.getAppWidgetOptions(id)
-            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 220).coerceAtLeast(110)
-            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 220).coerceAtLeast(110)
+            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 220).coerceAtLeast(110)
+            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220).coerceAtLeast(110)
             val columns = (width / 100).coerceIn(2, 4)
             val rows = (height / 106).coerceIn(2, 5)
             val visible = books.take(columns * rows)

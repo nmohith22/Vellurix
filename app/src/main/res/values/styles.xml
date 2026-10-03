@@ -1,5 +1,5 @@
 ﻿<resources>
-    <style name="Theme.FolioReader" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.Vellurix" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#9A5B45</item>
         <item name="android:windowLightStatusBar">true</item>
