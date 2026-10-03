@@ -59,7 +59,7 @@ Vellurix is an offline-first Android reader for phones and foldables. The interf
 - **Folder behavior:** Scans are explicit and non-destructive. Removed books remain excluded from later scans until the exclusion is cleared. Source files are never deleted.
 - **Widgets:** Android app widgets support launcher-controlled horizontal and vertical resizing. Their current artwork is generated from title and format; embedded cover extraction remains open.
 - **Build:** JDK 17, Android SDK 36, Gradle wrapper 8.13, AGP 8.13.1, Kotlin/Compose 2.3.20, min SDK 24. Unit tests pass. `assembleDebug` has been blocked by a timeout downloading `desugar_jdk_libs:2.1.5` from Google Maven; an alternate public mirror also did not respond.
-- **Repository:** Target is `https://github.com/nmohith22/Vellurix`; the local project folder and Git remote are intended to use `Vellurix`.
+- **Repository:** Project folder is `Development/Vellurix`; changes are pushed to `https://github.com/nmohith22/Vellurix` on `main`. The GitHub description is “Offline-first Android EPUB and PDF reader with customizable themes, responsive shelves, and resizable book widgets.”
 - **License:** Project code is licensed under Apache-2.0. Readium Kotlin Toolkit is BSD-3-Clause; dependency notices should be reviewed as dependencies are finalized.
 
 ## References
