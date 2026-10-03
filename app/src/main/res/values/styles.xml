@@ -1,0 +1,9 @@
+﻿<resources>
+    <style name="Theme.FolioReader" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#9A5B45</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F6F3EE</item>
+        <item name="android:statusBarColor">#F6F3EE</item>
+    </style>
+</resources>

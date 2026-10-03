@@ -1,0 +1,29 @@
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:label="Vellurix"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.FolioReader">
+        <activity android:name=".ReaderActivity" android:configChanges="orientation|screenSize|smallestScreenSize" android:exported="false" />
+        <activity android:name=".WidgetConfigureActivity" android:exported="true" android:theme="@style/Theme.FolioReader" />
+        <receiver android:name=".BookWidgetProvider" android:exported="true" android:label="Book">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/book_widget_info" />
+        </receiver>
+        <receiver android:name=".ShelfWidgetProvider" android:exported="true" android:label="Bookshelf">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/shelf_widget_info" />
+        </receiver>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+
+
+
