@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -121,6 +123,10 @@ private fun FolioApp(resumeTick: Int) {
     var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
     var readerFontScale by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("font_scale", 1f)) }
     var fontDialog by remember { mutableStateOf(false) }
+    var colorDialog by remember { mutableStateOf(false) }
+    var editingBackground by remember { mutableStateOf(true) }
+    var customBackground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))) }
+    var customForeground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))) }
     var search by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     LaunchedEffect(resumeTick) {
@@ -131,6 +137,8 @@ private fun FolioApp(resumeTick: Int) {
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
             readerFont = readerSettings.getString("font_family", "") ?: ""
             readerFontScale = readerSettings.getFloat("font_scale", 1f)
+            customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
+            customForeground = readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))
         }
     }
     fun saveBooks() {
@@ -317,6 +325,7 @@ private fun FolioApp(resumeTick: Int) {
                             }, label = { Text(label) })
                         }
                     }
+                    TextButton(onClick = { colorDialog = true }) { Text("Custom text and background colors") }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Column {
                             Text("Reading font", style = MaterialTheme.typography.titleSmall)
@@ -350,6 +359,33 @@ private fun FolioApp(resumeTick: Int) {
                 }
             }
         }, confirmButton = { TextButton(onClick = { fontDialog = false }) { Text("Done") } })
+    }
+
+    if (colorDialog) {
+        Dialog(onDismissRequest = { colorDialog = false }) {
+            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Global reader colors", style = MaterialTheme.typography.titleLarge, color = appColors.third)
+                    Box(Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(12.dp)).background(Color(customBackground)), contentAlignment = Alignment.Center) {
+                        Text("Reading preview", color = Color(customForeground), style = MaterialTheme.typography.titleMedium)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        FilterChip(selected = editingBackground, onClick = { editingBackground = true }, label = { Text("Background") })
+                        FilterChip(selected = !editingBackground, onClick = { editingBackground = false }, label = { Text("Text") })
+                    }
+                    AndroidView(factory = { viewContext -> HueWheel(viewContext) { picked -> if (editingBackground) customBackground = picked else customForeground = picked } }, modifier = Modifier.fillMaxWidth().height(250.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { colorDialog = false }) { Text("Cancel") }
+                        Button(onClick = {
+                            readerTheme = "custom"
+                            readerSettings.edit().putString("theme", "custom").putInt("background", customBackground).putInt("foreground", customForeground).apply()
+                            settings.edit().putString("reader_theme", "custom").apply()
+                            colorDialog = false
+                        }) { Text("Apply") }
+                    }
+                }
+            }
+        }
     }
 
     selectedBook?.let { book ->

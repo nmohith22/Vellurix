@@ -74,13 +74,13 @@ private fun epubCover(context: Context, uri: Uri): Bitmap? {
             val coverHref = zip.getInputStream(opf).use { stream ->
                 val parser = XmlPullParserFactory.newInstance().newPullParser()
                 parser.setInput(stream, null)
-                var legacyCoverId: String? = null
+                var legacyCoverReference: String? = null
                 val manifest = mutableMapOf<String, String>()
                 var cover: String? = null
                 while (parser.next() != XmlPullParser.END_DOCUMENT && cover == null) {
                     if (parser.eventType != XmlPullParser.START_TAG) continue
                     when (parser.name.substringAfter(':')) {
-                        "meta" -> if (parser.getAttributeValue(null, "name") == "cover") legacyCoverId = parser.getAttributeValue(null, "content")
+                        "meta" -> if (parser.getAttributeValue(null, "name") == "cover") legacyCoverReference = parser.getAttributeValue(null, "content")
                         "item" -> {
                             val id = parser.getAttributeValue(null, "id")
                             val href = parser.getAttributeValue(null, "href")
@@ -90,10 +90,12 @@ private fun epubCover(context: Context, uri: Uri): Bitmap? {
                         }
                     }
                 }
-                cover ?: legacyCoverId?.let(manifest::get)
+                cover ?: legacyCoverReference?.let { manifest[it] ?: it }
             } ?: return null
-            val imagePath = File(File(rootPath).parent ?: "", coverHref).path.replace('\\', '/')
-            val imageEntry = zip.getEntry(imagePath) ?: zip.getEntry(coverHref) ?: return null
+            val rootFolder = File(rootPath).parent.orEmpty().replace('\\', '/')
+            val decodedHref = Uri.decode(coverHref.substringBefore('#').substringBefore('?'))
+            val imagePath = normalizeZipPath(if (rootFolder.isEmpty()) decodedHref else "$rootFolder/$decodedHref")
+            val imageEntry = zip.getEntry(imagePath) ?: zip.getEntry(decodedHref) ?: return null
             zip.getInputStream(imageEntry).use { stream ->
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeStream(stream, null, bounds)
@@ -106,4 +108,16 @@ private fun epubCover(context: Context, uri: Uri): Bitmap? {
     } finally {
         archive.delete()
     }
+}
+
+private fun normalizeZipPath(path: String): String {
+    val segments = mutableListOf<String>()
+    path.replace('\\', '/').split('/').forEach { segment ->
+        when (segment) {
+            "", "." -> Unit
+            ".." -> { if (segments.isNotEmpty()) segments.removeAt(segments.lastIndex) }
+            else -> segments.add(segment)
+        }
+    }
+    return segments.joinToString("/")
 }

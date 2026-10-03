@@ -435,7 +435,7 @@ private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
     publisherStyles = appearance.fontFamily.isEmpty()
 )
 
-private class HueWheel(context: android.content.Context, private val changed: (Int) -> Unit) : View(context) {
+internal class HueWheel(context: android.content.Context, private val changed: (Int) -> Unit) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val colors = intArrayOf(0xFFFF0000.toInt(),0xFFFFFF00.toInt(),0xFF00FF00.toInt(),0xFF00FFFF.toInt(),0xFF0000FF.toInt(),0xFFFF00FF.toInt(),0xFFFF0000.toInt())
     override fun onDraw(canvas: Canvas) {
