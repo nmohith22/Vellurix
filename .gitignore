@@ -1,4 +1,6 @@
 .gradle-home/
+.android/
+.android-home/
 .tmp/
 .gradle/
 .kotlin/

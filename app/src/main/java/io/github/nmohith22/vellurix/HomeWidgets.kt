@@ -14,6 +14,7 @@ import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Bundle
+import android.util.LruCache
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -152,8 +153,13 @@ private fun openBook(context: Context, requestCode: Int, uri: String, title: Str
 
 private object CoverArtwork {
     private val colors = intArrayOf(0xFF677767.toInt(), 0xFFA96B54.toInt(), 0xFF6E7791.toInt(), 0xFFC19B59.toInt(), 0xFF9B767F.toInt())
+    private val cache = object : LruCache<String, Bitmap>(4 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
+    }
 
     fun create(title: String, format: String, width: Int = 360, height: Int = 520): Bitmap {
+        val key = "$title\u0000$format\u0000$width\u0000$height"
+        cache.get(key)?.let { return it }
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val index = (title.hashCode() and Int.MAX_VALUE) % colors.size
@@ -182,6 +188,7 @@ private object CoverArtwork {
         paint.textSize = width * .035f
         paint.alpha = 210
         canvas.drawText(format.uppercase(), width * .2f, height * .83f, paint)
+        cache.put(key, bitmap)
         return bitmap
     }
 

@@ -136,19 +136,30 @@ private fun FolioApp() {
         if (rootUri == null) { pickFolder.launch(null); return }
         scanning = true
         scope.launch {
-            val found = scanFolder(context, rootUri)
-            val excluded = store.exclusions()
-            val existing = books.mapTo(mutableSetOf()) { it.uri }
-            val added = found.filterNot { it.first.toString() in excluded || it.first.toString() in existing }
-            added.forEach { (uri, name, format) -> books.add(BookItem(uri.toString(), name.substringBeforeLast('.'), format)) }
-            saveBooks()
-            scanning = false
-            Toast.makeText(context, "Added ${added.size} supported files.", Toast.LENGTH_SHORT).show()
+            try {
+                val found = scanFolder(context, rootUri)
+                val excluded = store.exclusions()
+                val existing = books.mapTo(mutableSetOf()) { it.uri }
+                val added = found.filterNot { it.first.toString() in excluded || it.first.toString() in existing }
+                added.forEach { (uri, name, format) -> books.add(BookItem(uri.toString(), name.substringBeforeLast('.'), format)) }
+                saveBooks()
+                Toast.makeText(context, "Added ${added.size} supported files.", Toast.LENGTH_SHORT).show()
+            } catch (_: SecurityException) {
+                Toast.makeText(context, "Folder access expired. Choose the folder again, then populate.", Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+                Toast.makeText(context, "Could not scan the selected folder. Your library was not changed.", Toast.LENGTH_LONG).show()
+            } finally {
+                scanning = false
+            }
         }
     }
 
-    val visibleBooks = books.filter { book ->
-        (selectedShelf == "All books" || book.shelf == selectedShelf) && book.title.contains(search, true)
+    val visibleBooks by remember {
+        derivedStateOf {
+            books.filter { book ->
+                (selectedShelf == "All books" || book.shelf == selectedShelf) && book.title.contains(search, true)
+            }
+        }
     }
     MaterialTheme(colorScheme = lightColorScheme(primary = Accent, background = Canvas, surface = Color.White, onSurface = Ink, onBackground = Ink)) {
         Column(Modifier.fillMaxSize().background(Canvas)) {
@@ -248,13 +259,14 @@ private fun FolioApp() {
 }
 
 private suspend fun scanFolder(context: android.content.Context, uri: Uri): List<Triple<Uri, String, String>> = withContext(Dispatchers.IO) {
-    val root = DocumentFile.fromTreeUri(context, uri) ?: return@withContext emptyList()
+    val root = DocumentFile.fromTreeUri(context, uri) ?: error("The selected folder is unavailable.")
+    if (!root.canRead()) throw SecurityException("Folder access was revoked.")
     val queue = ArrayDeque<DocumentFile>()
     val found = mutableListOf<Triple<Uri, String, String>>()
     queue.add(root)
     while (queue.isNotEmpty()) {
         val current = queue.removeFirst()
-        runCatching { current.listFiles() }.getOrDefault(emptyArray()).forEach { child ->
+        current.listFiles().forEach { child ->
             if (child.isDirectory) queue.addLast(child)
             else if (child.isFile) child.name?.let { name -> fileFormat(name)?.let { ext -> found.add(Triple(child.uri, name, ext.uppercase())) } }
         }

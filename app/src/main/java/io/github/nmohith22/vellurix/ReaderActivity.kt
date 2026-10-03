@@ -25,6 +25,8 @@ import androidx.fragment.app.commitNow
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
@@ -49,6 +51,9 @@ import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.shared.util.toAbsoluteUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
+
+private const val READER_CONTAINER_ID = 0x00F01101
+private const val READER_CONTENT_ID = 0x00F01102
 
 class ReaderActivity : FragmentActivity() {
     private var containerId = View.NO_ID
@@ -78,7 +83,7 @@ class ReaderActivity : FragmentActivity() {
         bar.addView(rotateButton)
         bar.addView(Button(this).apply { text = "Aa"; contentDescription = "Reading appearance"; setOnClickListener { openAppearanceSettings() } })
         root.addView(bar, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        containerId = View.generateViewId()
+        containerId = READER_CONTAINER_ID
         root.addView(FrameLayout(this).apply { id = containerId }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         val pageBar = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(12, 0, 12, 6); setBackgroundColor(AndroidColor.rgb(246,243,238)) }
         pageBar.addView(Button(this).apply { text = "‹ Previous"; setOnClickListener { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.turnPage(false) } })
@@ -92,7 +97,7 @@ class ReaderActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (isFinishing) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         super.onDestroy()
     }
 
@@ -134,18 +139,30 @@ class ReaderActivity : FragmentActivity() {
 
     private fun showColorWheel() {
         val prefs = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        val initialColor = prefs.getInt("background", AndroidColor.rgb(64,96,128))
-        val preview = TextView(this).apply { text = " Aa "; textSize = 28f; gravity = Gravity.CENTER; tag = initialColor; setBackgroundColor(initialColor); setTextColor(AndroidColor.WHITE) }
-        val wheel = HueWheel(this) { color ->
-            preview.tag = color; preview.setBackgroundColor(color)
-            val luma = AndroidColor.red(color)*.299 + AndroidColor.green(color)*.587 + AndroidColor.blue(color)*.114
-            preview.setTextColor(if (luma > 145) AndroidColor.BLACK else AndroidColor.WHITE)
+        var background = prefs.getInt("background", AndroidColor.rgb(64,96,128))
+        var foreground = prefs.getInt("foreground", AndroidColor.rgb(30,30,30))
+        var editForeground = false
+        val preview = TextView(this).apply { text = "Vellurix reading preview"; textSize = 20f; gravity = Gravity.CENTER; setPadding(10, 12, 10, 12) }
+        fun updatePreview() { preview.setBackgroundColor(background); preview.setTextColor(foreground) }
+        val target = TextView(this).apply { text = "Adjusting: background"; gravity = Gravity.CENTER; setPadding(0, 8, 0, 8) }
+        val targetButtons = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            addView(Button(this@ReaderActivity).apply { text = "Background"; setOnClickListener { editForeground = false; target.text = "Adjusting: background" } })
+            addView(Button(this@ReaderActivity).apply { text = "Text"; setOnClickListener { editForeground = true; target.text = "Adjusting: text" } })
         }
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,8,24,8); addView(preview, LinearLayout.LayoutParams(-1,64)); addView(wheel, LinearLayout.LayoutParams(-1,260)) }
+        val wheel = HueWheel(this) { color ->
+            if (editForeground) foreground = color else background = color
+            updatePreview()
+        }
+        updatePreview()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(24,8,24,8)
+            addView(preview, LinearLayout.LayoutParams(-1,64)); addView(target)
+            addView(targetButtons); addView(wheel, LinearLayout.LayoutParams(-1,260))
+        }
         AlertDialog.Builder(this).setTitle("Choose a reading color").setView(content).setNegativeButton("Cancel", null).setPositiveButton("Apply") { _, _ ->
-            val bg = (preview.tag as? Int) ?: AndroidColor.rgb(64,96,128)
-            val luma = AndroidColor.red(bg)*.299 + AndroidColor.green(bg)*.587 + AndroidColor.blue(bg)*.114
-            prefs.edit().putString("theme", "custom").putInt("background", bg).putInt("foreground", if (luma > 145) AndroidColor.rgb(30,30,30) else AndroidColor.rgb(238,240,242)).apply(); applyAppearance()
+            prefs.edit().putString("theme", "custom").putInt("background", background).putInt("foreground", foreground).apply()
+            applyAppearance()
         }.show()
     }
 
@@ -160,6 +177,8 @@ class ReaderActivity : FragmentActivity() {
 
 private class ReaderHostFragment : Fragment() {
     private var containerId = View.NO_ID
+    private var scrollSaveJob: Job? = null
+    private var pendingScrollY = 0
 
     fun applyAppearance() {
         val prefs = requireContext().getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
@@ -212,11 +231,10 @@ private class ReaderHostFragment : Fragment() {
             childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFragment.createDummyFactory(PdfiumEngineProvider()) else EpubNavigatorFragment.createDummyFactory()
         }
         super.onCreate(savedInstanceState)
-        if (savedInstanceState != null) requireActivity().finish()
     }
 
     override fun onCreateView(inflater: android.view.LayoutInflater, parent: android.view.ViewGroup?, savedInstanceState: Bundle?): View =
-        FrameLayout(requireContext()).also { containerId = View.generateViewId(); it.id = containerId; it.setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
+        FrameLayout(requireContext()).also { containerId = READER_CONTENT_ID; it.id = containerId; it.setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val uri = arguments?.getString(ARG_URI)?.let(Uri::parse) ?: return showError("The selected book could not be opened.")
@@ -274,13 +292,30 @@ private class ReaderHostFragment : Fragment() {
         }
         val key = arguments?.getString(ARG_URI).orEmpty()
         val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
+        pendingScrollY = progress.getInt(key, 0)
         val scroll = ScrollView(context).apply {
             setBackgroundColor(palette.first)
             addView(content)
-            setOnScrollChangeListener { _, _, y, _, _ -> progress.edit().putInt(key, y).apply() }
-            post { scrollTo(0, progress.getInt(key, 0)) }
+            setOnScrollChangeListener { _, _, y, _, _ ->
+                pendingScrollY = y
+                scrollSaveJob?.cancel()
+                scrollSaveJob = viewLifecycleOwner.lifecycleScope.launch {
+                    delay(350)
+                    progress.edit().putInt(key, pendingScrollY).apply()
+                }
+            }
+            post { scrollTo(0, pendingScrollY) }
         }
         (view as? FrameLayout)?.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    override fun onDestroyView() {
+        scrollSaveJob?.cancel()
+        if (arguments?.getString(ARG_FORMAT).orEmpty() in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) arguments?.getString(ARG_URI)?.let { key ->
+            requireContext().getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
+                .edit().putInt(key, pendingScrollY).apply()
+        }
+        super.onDestroyView()
     }
 
     companion object {
