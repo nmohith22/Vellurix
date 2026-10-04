@@ -80,15 +80,48 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
 private const val READER_CONTAINER_ID = 0x00F01101
 private const val READER_CONTENT_ID = 0x00F01102
 
-private class PassThroughComposeContainer(context: android.content.Context, private val shouldHandle: (MotionEvent) -> Boolean) : FrameLayout(context) {
+internal enum class ReaderTapAction { IGNORE, ADD_BOOKMARK, PREVIOUS_PAGE, NEXT_PAGE, TOGGLE_CONTROLS }
+
+internal fun readerTapAction(x: Float, y: Float, width: Float, height: Float, inputBlocked: Boolean): ReaderTapAction {
+    if (inputBlocked || width <= 0f || height <= 0f) return ReaderTapAction.IGNORE
+    return when {
+        x >= width * .88f && y <= height * .12f -> ReaderTapAction.ADD_BOOKMARK
+        x < width * .30f -> ReaderTapAction.PREVIOUS_PAGE
+        x > width * .70f -> ReaderTapAction.NEXT_PAGE
+        else -> ReaderTapAction.TOGGLE_CONTROLS
+    }
+}
+
+private class PassThroughComposeContainer(
+    context: android.content.Context,
+    private val shouldHandle: (MotionEvent) -> Boolean,
+    private val blockUnderlying: () -> Boolean,
+    private val onUnconsumedTap: (Float, Float) -> Unit,
+) : FrameLayout(context) {
     private var handleCurrentGesture = false
+    private var blockCurrentGesture = false
+    private var downX = 0f
+    private var downY = 0f
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) handleCurrentGesture = shouldHandle(event)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            blockCurrentGesture = blockUnderlying()
+            handleCurrentGesture = blockCurrentGesture || shouldHandle(event)
+            downX = event.x
+            downY = event.y
+        }
         if (!handleCurrentGesture) return false
         val handled = super.dispatchTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) handleCurrentGesture = false
-        return handled
+        val block = blockCurrentGesture
+        if (event.actionMasked == MotionEvent.ACTION_UP && block && !handled &&
+            kotlin.math.abs(event.x - downX) < 12 * resources.displayMetrics.density &&
+            kotlin.math.abs(event.y - downY) < 12 * resources.displayMetrics.density
+        ) onUnconsumedTap(event.x, event.y)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            handleCurrentGesture = false
+            blockCurrentGesture = false
+        }
+        return handled || block
     }
 }
 
@@ -131,6 +164,7 @@ class ReaderActivity : FragmentActivity() {
     private var appearance by mutableStateOf<ReaderAppearance?>(null)
     private var toc by mutableStateOf(emptyList<ReaderNavItem>())
     private var bookmarks by mutableStateOf(emptyList<ReaderBookmark>())
+    private var currentPageLocatorJson by mutableStateOf<String?>(null)
     private var customizeThisBook by mutableStateOf(false)
     private var twoColumns by mutableStateOf(false)
     private var transition by mutableStateOf("page turn")
@@ -156,9 +190,15 @@ class ReaderActivity : FragmentActivity() {
         readerRoot = root
 
         root.addView(FrameLayout(this).apply { id = containerId }, FrameLayout.LayoutParams(-1, -1))
-        val overlay = PassThroughComposeContainer(this) { event ->
-            drawerOpen || settingsOpen || (controlsVisible && (event.y <= 140 * resources.displayMetrics.density || event.y >= root.height - 180 * resources.displayMetrics.density)) || event.x <= 30 * resources.displayMetrics.density
-        }
+        val overlay = PassThroughComposeContainer(
+            this,
+            shouldHandle = { event -> event.x <= 30 * resources.displayMetrics.density },
+            blockUnderlying = { controlsVisible || drawerOpen || settingsOpen },
+            onUnconsumedTap = { _, y ->
+                val density = resources.displayMetrics.density
+                if (controlsVisible && !drawerOpen && !settingsOpen && y > 140 * density && y < root.height - 180 * density) controlsVisible = false
+            },
+        )
         val composeOverlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
@@ -181,6 +221,7 @@ class ReaderActivity : FragmentActivity() {
                     supportsTwoColumns = intent.getStringExtra(EXTRA_FORMAT) == "EPUB",
                     toc = toc,
                     bookmarks = bookmarks,
+                    isCurrentPageBookmarked = currentPageLocatorJson?.let { current -> bookmarks.any { it.locator == current } } == true,
                     progress = readingProgress,
                     onDrawerOpenChange = { drawerOpen = it },
                     onSettingsOpenChange = { settingsOpen = it },
@@ -343,6 +384,10 @@ class ReaderActivity : FragmentActivity() {
         if (bookmarks.none { it.locator == json }) saveBookmarks(bookmarks + ReaderBookmark(host?.chapterTitle(locator) ?: locator.title?.takeIf { it.isNotBlank() } ?: "Saved place", json, locator.locations.position))
     }
 
+    internal fun bookmarkCurrentPage() = addBookmark()
+    internal fun isReaderInputBlocked() = controlsVisible || drawerOpen || settingsOpen
+    internal fun updateCurrentPageLocator(locatorJson: String) { currentPageLocatorJson = locatorJson }
+
     private fun removeBookmark(bookmark: ReaderBookmark) = saveBookmarks(bookmarks.filterNot { it.locator == bookmark.locator })
 
     internal fun toggleReaderControls() { controlsVisible = !controlsVisible }
@@ -370,10 +415,13 @@ class ReaderActivity : FragmentActivity() {
         nav.addInputListener(object : InputListener {
             override fun onTap(event: org.readium.r2.navigator.input.TapEvent): Boolean {
                 val width = nav.publicationView.width.toFloat().coerceAtLeast(1f)
-                when {
-                    event.point.x < width * .30f -> host.turnPage(false)
-                    event.point.x > width * .70f -> host.turnPage(true)
-                    else -> controlsVisible = !controlsVisible
+                val height = nav.publicationView.height.toFloat().coerceAtLeast(1f)
+                when (readerTapAction(event.point.x, event.point.y, width, height, isReaderInputBlocked())) {
+                    ReaderTapAction.ADD_BOOKMARK -> addBookmark()
+                    ReaderTapAction.PREVIOUS_PAGE -> host.turnPage(false)
+                    ReaderTapAction.NEXT_PAGE -> host.turnPage(true)
+                    ReaderTapAction.TOGGLE_CONTROLS -> controlsVisible = true
+                    ReaderTapAction.IGNORE -> Unit
                 }
                 return true
             }
@@ -495,21 +543,62 @@ class ReaderHostFragment : Fragment() {
             }
         }
         when (mode) {
-            "fade" -> navView?.let { target ->
-                target.animate().cancel()
-                target.animate().alpha(.12f).setDuration(100).withEndAction { go(false); target.animate().alpha(1f).setDuration(160).start() }.start()
+            "fade", "slide" -> navView?.takeIf { it.width > 0 }?.let { target ->
+                animateSimpleTransition(target, mode, forward) { go(false) }
             } ?: go(false)
-            "slide" -> {
-                val target = navView
-                if (target == null || target.width == 0) go(false) else {
-                    target.animate().cancel()
-                    val distance = target.width * .16f * if (forward) -1 else 1
-                    target.animate().translationX(distance).alpha(.65f).setDuration(110).withEndAction { go(false); target.translationX = -distance; target.animate().translationX(0f).alpha(1f).setDuration(160).start() }.start()
-                }
-            }
             "page turn" -> if (navView == null || !animatePageTurn(navView, forward) { go(false) }) go(true)
             else -> go(false)
         }
+    }
+
+    private fun animateSimpleTransition(target: View, mode: String, forward: Boolean, turn: () -> Unit) {
+        if (turningPage) return
+        turningPage = true
+        var turned = false
+        var finished = false
+        val split = 110f / 270f
+        val distance = target.width * .16f * if (forward) -1 else 1
+        lateinit var animator: ValueAnimator
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 270L
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener { value ->
+                val fraction = value.animatedValue as Float
+                if (fraction < split) {
+                    val phase = fraction / split
+                    if (mode == "fade") target.alpha = 1f - .88f * phase
+                    else {
+                        target.translationX = distance * phase
+                        target.alpha = 1f - .35f * phase
+                    }
+                } else {
+                    if (!turned) {
+                        turned = true
+                        turn()
+                    }
+                    val phase = ((fraction - split) / (1f - split)).coerceIn(0f, 1f)
+                    if (mode == "fade") target.alpha = .12f + .88f * phase
+                    else {
+                        target.translationX = -distance * (1f - phase)
+                        target.alpha = .65f + .35f * phase
+                    }
+                }
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private fun finish() {
+                    if (finished) return
+                    finished = true
+                    target.alpha = 1f
+                    target.translationX = 0f
+                    if (pageTurnAnimator === animator) pageTurnAnimator = null
+                    turningPage = false
+                }
+                override fun onAnimationEnd(animation: android.animation.Animator) = finish()
+                override fun onAnimationCancel(animation: android.animation.Animator) = finish()
+            })
+        }
+        pageTurnAnimator = animator
+        animator.start()
     }
 
     private fun animatePageTurn(target: View, forward: Boolean, turn: () -> Unit): Boolean {
@@ -721,6 +810,7 @@ class ReaderHostFragment : Fragment() {
             locatorSaveJob = viewLifecycleOwner.lifecycleScope.launch {
                 navigator.currentLocator.collect { current ->
                     progress.edit().putString(key, current.toJSON().toString()).apply()
+                    (activity as? ReaderActivity)?.updateCurrentPageLocator(current.toJSON().toString())
                     (activity as? ReaderActivity)?.updateProgress(
                         key,
                         current,
@@ -794,10 +884,14 @@ class ReaderHostFragment : Fragment() {
                     touchDownY = event.y
                 } else if (event.action == MotionEvent.ACTION_UP && kotlin.math.abs(event.x - touchDownX) < 18f && kotlin.math.abs(event.y - touchDownY) < 18f) {
                     val width = width.toFloat().coerceAtLeast(1f)
-                    when {
-                        touchDownX < width * .30f -> turnPage(false)
-                        touchDownX > width * .70f -> turnPage(true)
-                        else -> (activity as? ReaderActivity)?.toggleReaderControls()
+                    val height = height.toFloat().coerceAtLeast(1f)
+                    val reader = activity as? ReaderActivity
+                    when (readerTapAction(touchDownX, touchDownY, width, height, reader?.isReaderInputBlocked() == true)) {
+                        ReaderTapAction.ADD_BOOKMARK -> reader?.bookmarkCurrentPage()
+                        ReaderTapAction.PREVIOUS_PAGE -> turnPage(false)
+                        ReaderTapAction.NEXT_PAGE -> turnPage(true)
+                        ReaderTapAction.TOGGLE_CONTROLS -> reader?.toggleReaderControls()
+                        ReaderTapAction.IGNORE -> Unit
                     }
                 }
                 false
@@ -914,7 +1008,7 @@ private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, 
     EpubNavigatorFragment.Configuration().apply {
         readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) {
             org.readium.r2.navigator.epub.css.RsProperties(
-                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(48.5),
+                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(49.5),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
             )
         } else {

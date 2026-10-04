@@ -78,6 +78,7 @@ internal fun ReaderOverlay(
     supportsTwoColumns: Boolean,
     toc: List<ReaderNavItem>,
     bookmarks: List<ReaderBookmark>,
+    isCurrentPageBookmarked: Boolean,
     progress: ReaderProgressUi,
     onDrawerOpenChange: (Boolean) -> Unit,
     onSettingsOpenChange: (Boolean) -> Unit,
@@ -177,6 +178,20 @@ internal fun ReaderOverlay(
             }
         }
 
+        if (isCurrentPageBookmarked && !visible && !drawerOpen && !settingsOpen) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp).size(46.dp),
+                shape = CircleShape,
+                color = accent,
+                border = androidx.compose.foundation.BorderStroke(2.dp, if (bg.luminance() > .5f) Color.Black else Color.White),
+                shadowElevation = 8.dp,
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Bookmark, "Bookmarked page", tint = if (accent.luminance() > .5f) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+                }
+            }
+        }
+
         AnimatedVisibility(drawerOpen, enter = slideInHorizontally { -it } + fadeIn(), exit = slideOutHorizontally { -it } + fadeOut(), modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .42f)).clickable { onDrawerOpenChange(false) }) {
                 Surface(
@@ -266,6 +281,7 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                 }
             }
         }
+
     }
 }
 
