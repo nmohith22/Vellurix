@@ -1,7 +1,6 @@
 ﻿package io.github.nmohith22.vellurix
 
 import android.content.pm.ActivityInfo
-import android.app.AlertDialog
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Bundle
@@ -14,7 +13,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.SweepGradient
 import android.graphics.Typeface
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.LinearLayout
@@ -24,6 +22,16 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.commit
 import androidx.fragment.app.commitNow
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -49,6 +57,8 @@ import org.readium.r2.navigator.preferences.Theme
 import org.readium.r2.navigator.pdf.PdfNavigatorFactory
 import org.readium.r2.navigator.pdf.PdfNavigatorFragment
 import org.readium.r2.navigator.Navigator
+import org.readium.r2.navigator.VisualNavigator
+import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
@@ -60,10 +70,30 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
 private const val READER_CONTAINER_ID = 0x00F01101
 private const val READER_CONTENT_ID = 0x00F01102
 
+private class PassThroughComposeContainer(context: android.content.Context, private val shouldHandle: (MotionEvent) -> Boolean) : FrameLayout(context) {
+    private var handleCurrentGesture = false
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) handleCurrentGesture = shouldHandle(event)
+        if (!handleCurrentGesture) return false
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) handleCurrentGesture = false
+        return handled
+    }
+}
+
 class ReaderActivity : FragmentActivity() {
     private var containerId = View.NO_ID
     private var autoRotate = true
-    private var customizeThisBook = false
+    private var controlsVisible by mutableStateOf(false)
+    private var drawerOpen by mutableStateOf(false)
+    private var settingsOpen by mutableStateOf(false)
+    private var appearance by mutableStateOf<ReaderAppearance?>(null)
+    private var toc by mutableStateOf(emptyList<ReaderNavItem>())
+    private var bookmarks by mutableStateOf(emptyList<ReaderBookmark>())
+    private var customizeThisBook by mutableStateOf(false)
+    private var twoColumns by mutableStateOf(false)
+    private var transition by mutableStateOf("page turn")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,34 +101,83 @@ class ReaderActivity : FragmentActivity() {
         if (uri == null) { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Reading"
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
-        customizeThisBook = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("customize_this_book", false)
-
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
-        val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(14, 8, 14, 8); setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
-        bar.addView(Button(this).apply { text = "‹"; contentDescription = "Close reader"; setOnClickListener { finish() } })
-        bar.addView(TextView(this).apply { text = title; textSize = 18f; setTextColor(AndroidColor.rgb(41, 39, 36)); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(10, 0, 8, 0) }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val rotateButton = Button(this)
-        fun refreshRotation() {
-            rotateButton.text = if (autoRotate) "Rotate: on" else "Rotate: off"
-            requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
-        rotateButton.setOnClickListener {
-            autoRotate = !autoRotate
-            getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putBoolean("auto_rotate", autoRotate).apply()
-            refreshRotation()
-        }
-        bar.addView(rotateButton)
-        bar.addView(Button(this).apply { text = "Aa"; contentDescription = "Reading appearance"; setOnClickListener { openAppearanceSettings() } })
-        root.addView(bar, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         containerId = READER_CONTAINER_ID
-        root.addView(FrameLayout(this).apply { id = containerId }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        val pageBar = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(12, 0, 12, 6); setBackgroundColor(AndroidColor.rgb(246,243,238)) }
-        pageBar.addView(Button(this).apply { text = "‹ Previous"; setOnClickListener { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.turnPage(false) } })
-        pageBar.addView(Button(this).apply { text = "Next ›"; setOnClickListener { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.turnPage(true) } })
-        root.addView(pageBar, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        val root = FrameLayout(this).apply { setBackgroundColor(AndroidColor.rgb(250, 249, 246)) }
+        root.addView(FrameLayout(this).apply { id = containerId }, FrameLayout.LayoutParams(-1, -1))
+        val overlay = PassThroughComposeContainer(this) { event ->
+            drawerOpen || settingsOpen || (controlsVisible && (event.y <= 140 * resources.displayMetrics.density || event.y >= root.height - 180 * resources.displayMetrics.density)) || event.x <= 30 * resources.displayMetrics.density
+        }
+        val composeOverlay = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                val currentAppearance = appearance
+                if (currentAppearance != null) {
+                    val appPalette = resolveAppTheme(getSharedPreferences("library_settings", MODE_PRIVATE).getString("app_theme", "quiet_light") ?: "quiet_light")
+                    val scheme = if (appPalette.dark) darkColorScheme(primary = Color(appPalette.accent), background = Color(appPalette.background), surface = Color(appPalette.surface), onSurface = Color(appPalette.text), onBackground = Color(appPalette.text))
+                    else lightColorScheme(primary = Color(appPalette.accent), background = Color(appPalette.background), surface = Color(appPalette.surface), onSurface = Color(appPalette.text), onBackground = Color(appPalette.text))
+                    MaterialTheme(colorScheme = scheme) { ReaderOverlay(
+                    title = title,
+                    visible = controlsVisible,
+                    drawerOpen = drawerOpen,
+                    settingsOpen = settingsOpen,
+                    appearance = currentAppearance,
+                    appAccent = appPalette.accent,
+                    customizeBook = customizeThisBook,
+                    autoRotate = autoRotate,
+                    transition = transition,
+                    twoColumns = twoColumns,
+                    toc = toc,
+                    bookmarks = bookmarks,
+                    onDrawerOpenChange = { drawerOpen = it },
+                    onSettingsOpenChange = { settingsOpen = it },
+                    onHideControls = { controlsVisible = false },
+                    onClose = { finish() },
+                    onRotate = {
+                        autoRotate = !autoRotate
+                        getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putBoolean("auto_rotate", autoRotate).apply()
+                        applyRotation()
+                    },
+                    onTurn = { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.turnPage(it) },
+                    onNavigate = { value ->
+                        val host = supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment
+                        if (value.startsWith("toc:")) host?.navigateToToc(value.substringAfter(':').toIntOrNull() ?: -1)
+                        else parseSavedLocator(value)?.let { host?.navigateTo(it) }
+                    },
+                    onBookmark = ::addBookmark,
+                    onRemoveBookmark = ::removeBookmark,
+                    onAppearance = ::saveAppearance,
+                    onCustomizeBook = { enabled ->
+                        customizeThisBook = enabled
+                        getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putBoolean("customize_this_book", enabled).apply()
+                        appearance = if (enabled) loadReaderAppearance(this@ReaderActivity, uri.toString()) else loadGlobalReaderAppearanceForActivity()
+                        twoColumns = getScopedBoolean("two_columns", false)
+                    },
+                    onResetBook = {
+                        val prefs = getSharedPreferences("reader_book_appearance", MODE_PRIVATE)
+                        val prefix = "${uri}|"
+                        prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns").forEach { e.remove(prefix + it) } }.apply()
+                        appearance = loadReaderAppearance(this@ReaderActivity, uri.toString())
+                        twoColumns = getScopedBoolean("two_columns", false)
+                    },
+                    onTransition = { mode -> transition = mode; getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putString("page_transition", mode).apply() },
+                    onColumns = { enabled -> twoColumns = enabled; saveScopedBoolean("two_columns", enabled); (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance() },
+                    ) }
+                }
+            }
+            setBackgroundColor(AndroidColor.TRANSPARENT)
+            isClickable = false
+            isFocusable = false
+        }
+        overlay.addView(composeOverlay, FrameLayout.LayoutParams(-1, -1))
+        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
         enterImmersiveReader()
-        refreshRotation()
+        customizeThisBook = getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean("customize_this_book", false)
+        appearance = loadReaderAppearance(this, uri.toString())
+        twoColumns = getScopedBoolean("two_columns", false)
+        transition = getSharedPreferences("reader_settings", MODE_PRIVATE).getString("page_transition", "page turn") ?: "page turn"
+        applyRotation()
+        loadBookmarks()
         if (savedInstanceState == null) {
             supportFragmentManager.commit { replace(containerId, ReaderHostFragment.create(uri.toString(), intent.getStringExtra(EXTRA_FORMAT).orEmpty())) }
         }
@@ -109,69 +188,67 @@ class ReaderActivity : FragmentActivity() {
         super.onDestroy()
     }
 
-    private fun openAppearanceSettings() {
+    private fun applyRotation() { requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+
+    private fun loadGlobalReaderAppearanceForActivity(): ReaderAppearance {
+        val prefs = getSharedPreferences("reader_settings", MODE_PRIVATE)
+        return ReaderAppearance(prefs.getString("theme", "paper") ?: "paper", prefs.getInt("background", AndroidColor.rgb(250,249,246)), prefs.getInt("foreground", AndroidColor.rgb(43,42,39)), prefs.getString("font_family", "") ?: "", prefs.getFloat("font_scale", 1f), prefs.getBoolean("two_columns", false))
+    }
+
+    private fun saveAppearance(value: ReaderAppearance) {
+        appearance = value
         val prefs = scopedAppearancePreferences()
         val prefix = scopedAppearanceKey("")
-        val themes = arrayOf("Paper", "White", "Sepia", "Night", "Forest", "Slate", "Custom color wheel")
-        val items = arrayOf(if (customizeThisBook) "Edit global appearance" else "Customize this book only", *themes) +
-            if (customizeThisBook) arrayOf("Reset this book to global defaults") else emptyArray()
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(if (customizeThisBook) "This book's appearance" else "Global reading appearance")
-            .setItems(items) { _, which ->
-            if (which == 0) {
-                customizeThisBook = !customizeThisBook
-                getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putBoolean("customize_this_book", customizeThisBook).apply()
-                openAppearanceSettings()
-                return@setItems
+        prefs.edit().putString(prefix + "theme", value.theme).putInt(prefix + "background", value.background)
+            .putInt(prefix + "foreground", value.foreground).putString(prefix + "font_family", value.fontFamily)
+            .putFloat(prefix + "font_scale", value.fontScale).apply()
+        (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance()
+    }
+
+    private fun getScopedBoolean(key: String, default: Boolean): Boolean = if (customizeThisBook) {
+        getSharedPreferences("reader_book_appearance", MODE_PRIVATE).getBoolean(scopedAppearanceKey(key), getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean(key, default))
+    } else getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean(key, default)
+
+    private fun saveScopedBoolean(key: String, value: Boolean) = scopedAppearancePreferences().edit().putBoolean(scopedAppearanceKey(key), value).apply()
+
+    private fun loadBookmarks() {
+        val key = "bookmarks:${intent.getStringExtra(EXTRA_URI).orEmpty()}"
+        val data = getSharedPreferences("reader_bookmarks", MODE_PRIVATE).getString(key, "[]")
+        bookmarks = runCatching {
+            val array = org.json.JSONArray(data)
+            (0 until array.length()).map { array.getJSONObject(it).let { item -> ReaderBookmark(item.getString("title"), item.getString("locator")) } }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveBookmarks(values: List<ReaderBookmark>) {
+        bookmarks = values
+        val key = "bookmarks:${intent.getStringExtra(EXTRA_URI).orEmpty()}"
+        getSharedPreferences("reader_bookmarks", MODE_PRIVATE).edit().putString(key, org.json.JSONArray().apply { values.forEach { put(org.json.JSONObject().put("title", it.title).put("locator", it.locator)) } }.toString()).apply()
+    }
+
+    private fun addBookmark() {
+        val locator = (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.currentLocator() ?: return
+        val json = locator.toJSON().toString()
+        if (bookmarks.none { it.locator == json }) saveBookmarks(bookmarks + ReaderBookmark(locator.title ?: "Saved place", json))
+    }
+
+    private fun removeBookmark(bookmark: ReaderBookmark) = saveBookmarks(bookmarks.filterNot { it.locator == bookmark.locator })
+
+    internal fun toggleReaderControls() { controlsVisible = !controlsVisible }
+
+    internal fun onNavigatorReady(host: ReaderHostFragment, nav: VisualNavigator, links: List<org.readium.r2.shared.publication.Link>, depths: List<Int>) {
+        toc = links.mapIndexed { index, link -> ReaderNavItem(link.title ?: "Section ${index + 1}", depths.getOrElse(index) { 0 }, "toc:$index") }
+        nav.addInputListener(object : InputListener {
+            override fun onTap(event: org.readium.r2.navigator.input.TapEvent): Boolean {
+                val width = nav.publicationView.width.toFloat().coerceAtLeast(1f)
+                when {
+                    event.point.x < width * .30f -> host.turnPage(false)
+                    event.point.x > width * .70f -> host.turnPage(true)
+                    else -> controlsVisible = !controlsVisible
+                }
+                return true
             }
-            val themeIndex = which - 1
-            if (themeIndex == themes.size) {
-                val bookPrefs = getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
-                val bookPrefix = scopedAppearanceKey("")
-                val editor = bookPrefs.edit()
-                listOf("theme", "background", "foreground", "font_family", "font_scale").forEach { editor.remove(bookPrefix + it) }
-                editor.apply()
-                applyAppearance()
-                return@setItems
-            }
-            val e = prefs.edit()
-            val themeKey = prefix + "theme"
-            val backgroundKey = prefix + "background"
-            val foregroundKey = prefix + "foreground"
-            when (themeIndex) {
-                0 -> e.putString(themeKey, "paper").putInt(backgroundKey, AndroidColor.rgb(250,249,246)).putInt(foregroundKey, AndroidColor.rgb(43,42,39))
-                1 -> e.putString(themeKey, "white").putInt(backgroundKey, AndroidColor.WHITE).putInt(foregroundKey, AndroidColor.rgb(35,35,35))
-                2 -> e.putString(themeKey, "sepia").putInt(backgroundKey, AndroidColor.rgb(244,232,207)).putInt(foregroundKey, AndroidColor.rgb(71,55,39))
-                3 -> e.putString(themeKey, "night").putInt(backgroundKey, AndroidColor.rgb(14,16,19)).putInt(foregroundKey, AndroidColor.rgb(211,215,219))
-                4 -> e.putString(themeKey, "forest").putInt(backgroundKey, AndroidColor.rgb(22,35,27)).putInt(foregroundKey, AndroidColor.rgb(218,229,218))
-                5 -> e.putString(themeKey, "slate").putInt(backgroundKey, AndroidColor.rgb(30,38,49)).putInt(foregroundKey, AndroidColor.rgb(220,226,235))
-                6 -> { showColorWheel(); return@setItems }
-            }
-            e.apply(); applyAppearance()
-        }.setNeutralButton("Text size") { _, _ ->
-            val sizes = (9..20).map { "${it * 10}%" }.toTypedArray()
-            AlertDialog.Builder(this).setTitle("Text size").setSingleChoiceItems(sizes, ((scopedAppearanceFloat("font_scale", 1f)*10)-9).toInt().coerceIn(0,11)) { d, i -> prefs.edit().putFloat(prefix + "font_scale", .9f + i*.1f).apply(); d.dismiss(); applyAppearance() }.setNegativeButton("Close", null).show()
-        }.setPositiveButton("Fonts") { _, _ ->
-            val format = intent.getStringExtra(EXTRA_FORMAT).orEmpty()
-            if (format == "PDF") {
-                AlertDialog.Builder(this).setMessage("Fonts can be changed in reflowable EPUB and text books.").setPositiveButton("OK", null).show()
-                return@setPositiveButton
-            }
-            val labels = if (format == "EPUB") arrayOf("Publisher default", "Serif", "Sans serif", "Cursive", "Fantasy", "Monospace", "OpenDyslexic", "Accessible DfA", "iA Writer Duospace")
-                else arrayOf("Default", "Serif", "Sans serif", "Cursive", "Fantasy", "Monospace")
-            val values = if (format == "EPUB") arrayOf("", "serif", "sans-serif", "cursive", "fantasy", "monospace", "OpenDyslexic", "AccessibleDfA", "iA Writer Duospace")
-                else arrayOf("", "serif", "sans-serif", "cursive", "fantasy", "monospace")
-            AlertDialog.Builder(this).setTitle("Reading font").setItems(labels) { _, i -> prefs.edit().putString(prefix + "font_family", values[i]).apply(); applyAppearance() }.show()
-        }.setNegativeButton("Transitions") { _, _ ->
-            val modes = arrayOf("None", "Fade", "Slide", "Page turn")
-            val globalPrefs = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-            val current = globalPrefs.getString("page_transition", "page turn")
-            AlertDialog.Builder(this).setTitle("Page turn animation").setSingleChoiceItems(modes, modes.indexOfFirst { it.equals(current, true) }.coerceAtLeast(0)) { dialog, which -> globalPrefs.edit().putString("page_transition", modes[which].lowercase()).apply(); dialog.dismiss() }.setNegativeButton("Close", null).show()
-        }
-        if (intent.getStringExtra(EXTRA_FORMAT).orEmpty() == "PDF") {
-            dialog.setMessage("PDF page appearance is controlled by the document. Theme and font settings apply to EPUB and flowing text.")
-        }
-        dialog.show()
+        })
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -199,46 +276,6 @@ class ReaderActivity : FragmentActivity() {
     private fun scopedAppearanceKey(key: String) =
         (if (customizeThisBook) "${intent.getStringExtra(EXTRA_URI).orEmpty()}|" else "") + key
 
-    private fun scopedAppearanceFloat(key: String, default: Float): Float {
-        val global = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
-        return if (customizeThisBook) scopedAppearancePreferences().getFloat(scopedAppearanceKey(key), global.getFloat(key, default)) else global.getFloat(key, default)
-    }
-
-    private fun showColorWheel() {
-        val current = if (customizeThisBook) loadReaderAppearance(this, intent.getStringExtra(EXTRA_URI).orEmpty()) else loadGlobalReaderAppearance(this)
-        var background = current.background
-        var foreground = current.foreground
-        var editForeground = false
-        val preview = TextView(this).apply { text = "Vellurix reading preview"; textSize = 20f; gravity = Gravity.CENTER; setPadding(10, 12, 10, 12) }
-        fun updatePreview() { preview.setBackgroundColor(background); preview.setTextColor(foreground) }
-        val target = TextView(this).apply { text = "Adjusting: background"; gravity = Gravity.CENTER; setPadding(0, 8, 0, 8) }
-        val targetButtons = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            addView(Button(this@ReaderActivity).apply { text = "Background"; setOnClickListener { editForeground = false; target.text = "Adjusting: background" } })
-            addView(Button(this@ReaderActivity).apply { text = "Text"; setOnClickListener { editForeground = true; target.text = "Adjusting: text" } })
-        }
-        val wheel = HueWheel(this) { color ->
-            if (editForeground) foreground = color else background = color
-            updatePreview()
-        }
-        updatePreview()
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(24,8,24,8)
-            addView(preview, LinearLayout.LayoutParams(-1,64)); addView(target)
-            addView(targetButtons); addView(wheel, LinearLayout.LayoutParams(-1,260))
-        }
-        AlertDialog.Builder(this).setTitle("Choose a reading color").setView(content).setNegativeButton("Cancel", null).setPositiveButton("Apply") { _, _ ->
-            scopedAppearancePreferences().edit()
-                .putString(scopedAppearanceKey("theme"), "custom")
-                .putInt(scopedAppearanceKey("background"), background)
-                .putInt(scopedAppearanceKey("foreground"), foreground)
-                .apply()
-            applyAppearance()
-        }.show()
-    }
-
-    private fun applyAppearance() { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance() }
-
     companion object {
         const val EXTRA_URI = "book_uri"
         const val EXTRA_TITLE = "book_title"
@@ -250,13 +287,25 @@ class ReaderHostFragment : Fragment() {
     private var containerId = View.NO_ID
     private var scrollSaveJob: Job? = null
     private var pendingScrollY = 0
+    private var tocLinks: List<org.readium.r2.shared.publication.Link> = emptyList()
+    private var tocDepths: List<Int> = emptyList()
+    private var touchDownX = 0f
+    private var touchDownY = 0f
 
     fun applyAppearance() {
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
         (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(appearance))
-        if (arguments?.getString(ARG_FORMAT).orEmpty() in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) {
-            (view as? FrameLayout)?.removeAllViews()
-            onViewCreated(view ?: return, null)
+        when (arguments?.getString(ARG_FORMAT).orEmpty()) {
+            "TXT", "HTML", "HTM", "FB2", "RTF" -> {
+                (view as? FrameLayout)?.removeAllViews()
+                onViewCreated(view ?: return, null)
+            }
+            "PDF" -> childFragmentManager.findFragmentByTag("publication_reader")?.view?.let { page ->
+                page.pivotX = page.width / 2f
+                page.pivotY = page.height / 2f
+                page.scaleX = appearance.fontScale
+                page.scaleY = appearance.fontScale
+            }
         }
     }
 
@@ -295,6 +344,18 @@ class ReaderHostFragment : Fragment() {
             else -> go()
         }
     }
+
+    fun navigateToToc(index: Int) {
+        val link = tocLinks.getOrNull(index) ?: return
+        (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.go(link, true)
+    }
+
+    fun navigateTo(locator: org.readium.r2.shared.publication.Locator) {
+        (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.go(locator, true)
+    }
+
+    fun currentLocator(): org.readium.r2.shared.publication.Locator? =
+        (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.currentLocator?.value
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (savedInstanceState != null) {
@@ -346,6 +407,9 @@ class ReaderHostFragment : Fragment() {
                         throw retryError
                     }
                 }
+                val flattenedToc = publication.tableOfContents.flatMap { flattenToc(it, 0) }
+                tocLinks = flattenedToc.map { it.first }
+                tocDepths = flattenedToc.map { it.second }
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 val factory = if (format == "PDF") PdfNavigatorFactory(publication, PdfiumEngineProvider()).createFragmentFactory(initialLocator = initialLocator)
@@ -354,6 +418,10 @@ class ReaderHostFragment : Fragment() {
                 clearLoading()
                 childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
                 val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? Navigator
+                val visualNavigator = childFragmentManager.findFragmentByTag("publication_reader") as? VisualNavigator
+                if (visualNavigator != null) {
+                    (activity as? ReaderActivity)?.onNavigatorReady(this@ReaderHostFragment, visualNavigator, tocLinks, tocDepths)
+                }
                 if (navigator != null) navigator.currentLocator.collect { locator -> progress.edit().putString(uri.toString(), locator.toJSON().toString()).apply() }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
@@ -413,6 +481,20 @@ class ReaderHostFragment : Fragment() {
                     progress.edit().putInt(key, pendingScrollY).apply()
                 }
             }
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    touchDownX = event.x
+                    touchDownY = event.y
+                } else if (event.action == MotionEvent.ACTION_UP && kotlin.math.abs(event.x - touchDownX) < 18f && kotlin.math.abs(event.y - touchDownY) < 18f) {
+                    val width = width.toFloat().coerceAtLeast(1f)
+                    when {
+                        touchDownX < width * .30f -> turnPage(false)
+                        touchDownX > width * .70f -> turnPage(true)
+                        else -> (activity as? ReaderActivity)?.toggleReaderControls()
+                    }
+                }
+                false
+            }
             post { scrollTo(0, pendingScrollY) }
         }
         (view as? FrameLayout)?.addView(scroll, FrameLayout.LayoutParams(-1, -1))
@@ -433,6 +515,9 @@ class ReaderHostFragment : Fragment() {
         fun create(uri: String, format: String) = ReaderHostFragment().apply { arguments = Bundle().apply { putString(ARG_URI, uri); putString(ARG_FORMAT, format) } }
     }
 }
+
+private fun flattenToc(link: org.readium.r2.shared.publication.Link, depth: Int): List<Pair<org.readium.r2.shared.publication.Link, Int>> =
+    listOf(link to depth) + link.children.flatMap { flattenToc(it, depth + 1) }
 
 private fun openBookStream(context: android.content.Context, uri: Uri): java.io.InputStream =
     if (uri.scheme == "file") File(uri.path ?: error("Invalid local file location")).inputStream()
@@ -457,19 +542,20 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
     val global = loadGlobalReaderAppearance(context)
     val bookPrefs = context.getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
     val prefix = "$uri|"
-    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale").any { bookPrefs.contains(prefix + it) }) {
+    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns").any { bookPrefs.contains(prefix + it) }) {
         ReaderAppearanceOverrides(
             theme = if (bookPrefs.contains(prefix + "theme")) bookPrefs.getString(prefix + "theme", null) else null,
             background = if (bookPrefs.contains(prefix + "background")) bookPrefs.getInt(prefix + "background", global.background) else null,
             foreground = if (bookPrefs.contains(prefix + "foreground")) bookPrefs.getInt(prefix + "foreground", global.foreground) else null,
             fontFamily = if (bookPrefs.contains(prefix + "font_family")) bookPrefs.getString(prefix + "font_family", "") else null,
             fontScale = if (bookPrefs.contains(prefix + "font_scale")) bookPrefs.getFloat(prefix + "font_scale", global.fontScale) else null,
+            twoColumns = if (bookPrefs.contains(prefix + "two_columns")) bookPrefs.getBoolean(prefix + "two_columns", global.twoColumns) else null,
         )
     } else null
     return resolveReaderAppearance(global, overrides)
 }
 
-private fun loadGlobalReaderAppearance(context: android.content.Context): ReaderAppearance {
+    private fun loadGlobalReaderAppearance(context: android.content.Context): ReaderAppearance {
     val prefs = context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
     return ReaderAppearance(
         theme = prefs.getString("theme", "paper") ?: "paper",
@@ -477,6 +563,7 @@ private fun loadGlobalReaderAppearance(context: android.content.Context): Reader
         foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
         fontFamily = prefs.getString("font_family", "") ?: "",
         fontScale = prefs.getFloat("font_scale", 1f),
+        twoColumns = prefs.getBoolean("two_columns", false),
     )
 }
 
@@ -485,6 +572,7 @@ internal fun parseSavedLocator(json: String?): org.readium.r2.shared.publication
 
 private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
     backgroundColor = ReadiumColor(appearance.background),
+    columnCount = if (appearance.twoColumns) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
     textColor = ReadiumColor(appearance.foreground),
     theme = when (appearance.theme) { "sepia" -> Theme.SEPIA; "night", "forest", "slate", "custom" -> Theme.DARK; else -> Theme.LIGHT },
     fontFamily = when (appearance.fontFamily) {
@@ -492,6 +580,7 @@ private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
         "OpenDyslexic" -> FontFamily.OPEN_DYSLEXIC; "AccessibleDfA" -> FontFamily.ACCESSIBLE_DFA; "iA Writer Duospace" -> FontFamily.IA_WRITER_DUOSPACE; else -> null
     },
     fontSize = appearance.fontScale.toDouble(),
+    scroll = !appearance.twoColumns,
     publisherStyles = appearance.fontFamily.isEmpty()
 )
 

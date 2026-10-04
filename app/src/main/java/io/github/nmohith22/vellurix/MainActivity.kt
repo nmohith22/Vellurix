@@ -230,27 +230,25 @@ private fun FolioApp(resumeTick: Int) {
             }
         }
     }
-    val appColors = when (appTheme) {
-        "dark" -> Triple(Color(0xFF17191C), Color(0xFF222529), Color(0xFFE4E6E8))
-        "sepia" -> Triple(Color(0xFFF0E5D1), Color(0xFFF8F1E4), Color(0xFF493B2D))
-        else -> Triple(Canvas, Color.White, Ink)
-    }
+    val palette = resolveAppTheme(appTheme)
+    val appColors = Triple(Color(palette.background), Color(palette.surface), Color(palette.text))
+    val appAccent = Color(palette.accent)
     val hostActivity = context as? android.app.Activity
     SideEffect {
         hostActivity?.window?.apply {
             statusBarColor = appColors.first.toArgb()
             navigationBarColor = appColors.first.toArgb()
             @Suppress("DEPRECATION")
-            decorView.systemUiVisibility = if (appTheme == "dark") 0 else android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            decorView.systemUiVisibility = if (palette.dark) 0 else android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
     }
-    val appColorScheme = if (appTheme == "dark") darkColorScheme(primary = Color(0xFFE0A08A), background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
-        else lightColorScheme(primary = Accent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
+    val appColorScheme = if (palette.dark) darkColorScheme(primary = appAccent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
+        else lightColorScheme(primary = appAccent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
     MaterialTheme(colorScheme = appColorScheme) {
         Column(Modifier.fillMaxSize().background(appColors.first).windowInsetsPadding(WindowInsets.systemBars)) {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 10.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text("VELLURIX", style = MaterialTheme.typography.labelLarge, color = Accent, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
+                    Text("VELLURIX", style = MaterialTheme.typography.labelLarge, color = appAccent, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
                     Text("Your library", style = MaterialTheme.typography.headlineMedium, color = appColors.third, fontWeight = FontWeight.SemiBold)
                 }
                 Row {
@@ -279,7 +277,7 @@ private fun FolioApp(resumeTick: Int) {
             if (visibleBooks.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Icon(Icons.Rounded.AutoStories, null, Modifier.size(42.dp), tint = Accent)
+                        Icon(Icons.Rounded.AutoStories, null, Modifier.size(42.dp), tint = appAccent)
                         Text(if (books.isEmpty()) "A quieter place to read" else "No books in this shelf", style = MaterialTheme.typography.titleLarge, color = Ink)
                         Text(if (books.isEmpty()) "Import a book or scan a folder you choose." else "Choose another shelf or add a book.", style = MaterialTheme.typography.bodyMedium, color = Muted)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -329,9 +327,16 @@ private fun FolioApp(resumeTick: Int) {
                     Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
                     Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
                     Text("App theme", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("paper" to "Paper", "sepia" to "Sepia", "dark" to "Dark").forEach { (key, label) ->
-                            FilterChip(selected = appTheme == key, onClick = { appTheme = key; settings.edit().putString("app_theme", key).apply() }, label = { Text(label) })
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+                        items(appThemes.size) { index ->
+                            val theme = appThemes[index]
+                            val selectedTheme = appTheme == theme.id || (appTheme == "paper" && theme.id == "quiet_light") || (appTheme == "dark" && theme.id == "quiet_dark")
+                            Surface(onClick = { appTheme = theme.id; settings.edit().putString("app_theme", theme.id).apply() }, shape = RoundedCornerShape(14.dp), color = Color(theme.surface), border = if (selectedTheme) androidx.compose.foundation.BorderStroke(2.dp, Color(theme.accent)) else androidx.compose.foundation.BorderStroke(1.dp, Color(theme.muted).copy(alpha = .35f)), modifier = Modifier.width(148.dp)) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(theme.name, color = Color(theme.text), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(theme.background, theme.surface, theme.accent, theme.text).forEach { color -> Box(Modifier.size(16.dp).clip(RoundedCornerShape(50)).background(Color(color))) } }
+                                }
+                            }
                         }
                     }
                     Text("Global reader theme", style = MaterialTheme.typography.titleSmall)
@@ -416,7 +421,7 @@ private fun FolioApp(resumeTick: Int) {
     selectedBook?.let { book ->
         AlertDialog(
             onDismissRequest = { selectedBook = null },
-            icon = { Icon(Icons.Rounded.AutoStories, null, tint = Accent) },
+            icon = { Icon(Icons.Rounded.AutoStories, null, tint = appAccent) },
             title = { Text(book.title) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
