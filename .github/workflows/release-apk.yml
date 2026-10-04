@@ -1,0 +1,58 @@
+name: Publish APK release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "release/Vellurix-*.apk"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish each new APK version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSH_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          mapfile -t apks < <(git diff --name-only --diff-filter=AMR "$BEFORE_SHA" "$PUSH_SHA" -- 'release/Vellurix-*.apk')
+          if (( ${#apks[@]} == 0 )); then
+            echo "No versioned Vellurix APK was changed in this commit."
+            exit 0
+          fi
+
+          commit_message="$(git log -1 --format=%s "$PUSH_SHA")"
+          for apk in "${apks[@]}"; do
+            filename="${apk##*/}"
+            version="${filename#Vellurix-}"
+            version="${version%.apk}"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "APK filename must use Vellurix-major.minor.patch.apk: $filename" >&2
+              exit 1
+            fi
+
+            tag="v$version"
+            notes_file="$(mktemp)"
+            printf -- '- %s\n' "$commit_message" > "$notes_file"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              if gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fxq "$filename"; then
+                echo "Release $tag already contains $filename."
+              else
+                gh release upload "$tag" "$apk"
+              fi
+            else
+              gh release create "$tag" "$apk" --title "Vellurix $version" --notes-file "$notes_file" --target "$PUSH_SHA"
+            fi
+            rm -f "$notes_file"
+          done

@@ -20,6 +20,8 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 - Choose from 19 Monkeytype-inspired app themes adapted from the local `workout_app` palette.
 - Tap a book card or list row to read it. Choose card covers with or without titles; list rows always show both. Long-press to rename the in-app title, open live per-book reader settings, assign a shelf, select books for batch shelf moves, or remove a book.
 - Switch the library between card and list views, resize the items, and change the app theme from Settings.
+- Settings are grouped into Library, Reader, and Data tabs; reader controls are split into Appearance, Layout, and Controls.
+- Return to the shelf you last selected when reopening the library.
 - See embedded EPUB covers and first-page PDF previews in the library; each card and row picks up a tint from its cover.
 - See each book's reading progress on library cards and list rows, displayed as a percentage or position count. A continue-reading banner opens your most recent book.
 - On compact screens, settings can replace list-row progress bars with a percentage while cards retain their progress indicators.

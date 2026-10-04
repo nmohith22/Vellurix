@@ -131,9 +131,12 @@ private class LibraryStore(context: android.content.Context) {
 private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { LibraryStore(context.applicationContext) }
+    val settings = remember { context.getSharedPreferences("library_settings", android.content.Context.MODE_PRIVATE) }
     val books = remember { mutableStateListOf<BookItem>().apply { addAll(store.books()) } }
     val shelves = remember { mutableStateListOf("All books").apply { addAll(store.shelves().filterNot { it in this }) } }
-    var selectedShelf by remember { mutableStateOf("All books") }
+    var selectedShelf by remember {
+        mutableStateOf(resolveSelectedShelf(saved = settings.getString("selected_shelf", null), shelves = store.shelves()))
+    }
     var folderUri by remember { mutableStateOf(store.folder()) }
     var scanning by remember { mutableStateOf(false) }
     var shelfDialog by remember { mutableStateOf(false) }
@@ -144,7 +147,6 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     val selectedBooks = remember { mutableStateListOf<String>() }
     var bulkShelfDialog by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
-    val settings = remember { context.getSharedPreferences("library_settings", android.content.Context.MODE_PRIVATE) }
     val readerSettings = remember { context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE) }
     var layoutMode by rememberSaveable { mutableStateOf(settings.getString("layout", "cards") ?: "cards") }
     var cardSize by rememberSaveable { mutableFloatStateOf(settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)) }
@@ -227,6 +229,8 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
             readerContinuous = readerSettings.getBoolean("continuous", false)
             customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
             customForeground = readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))
+            selectedShelf = resolveSelectedShelf(settings.getString("selected_shelf", null), shelves)
+            settings.edit().putString("selected_shelf", selectedShelf).apply()
         }
     }
     fun saveBooks() {
@@ -387,7 +391,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                     TextButton(onClick = { selectedBooks.clear() }) { Text("Cancel") }
                 }
             }
-            LazyRow(modifier = Modifier.padding(bottom = 12.dp), contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(shelves.size) { index ->
                     val shelf = shelves[index]
                     val isSelected = shelf == selectedShelf
@@ -398,7 +402,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                     )
                     Surface(
                         modifier = Modifier.combinedClickable(
-                            onClick = { selectedShelf = shelf },
+                            onClick = { selectedShelf = shelf; settings.edit().putString("selected_shelf", shelf).apply() },
                             onLongClick = {
                                 if (shelf != "All books") {
                                     shelfName = shelf
@@ -471,13 +475,13 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                     if (index >= 0) {
                         shelves[index] = name
                         store.saveShelves(shelves.drop(1))
-                        if (selectedShelf == target) selectedShelf = name
+                        if (selectedShelf == target) { selectedShelf = name; settings.edit().putString("selected_shelf", name).apply() }
                         books.indices.forEach { i -> if (books[i].shelf == target) books[i] = books[i].copy(shelf = name) }
                         renameShelfWidgetSelections(context.applicationContext, target, name)
                         saveBooks()
                     }
                 } else {
-                    shelves.add(name); store.saveShelves(shelves.drop(1)); refreshHomeWidgets(context.applicationContext); selectedShelf = name
+                    shelves.add(name); store.saveShelves(shelves.drop(1)); refreshHomeWidgets(context.applicationContext); selectedShelf = name; settings.edit().putString("selected_shelf", name).apply()
                 }
             }
             shelfName = ""; shelfDialog = false; shelfRenameTarget = null
@@ -487,108 +491,110 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     if (hiddenDialog) AlertDialog(onDismissRequest = { hiddenDialog = false }, title = { Text("Clear removed-book exclusions?") }, text = { Text("Previously removed books can appear again the next time you populate the selected folder.") }, confirmButton = { TextButton(onClick = { store.saveExclusions(emptySet()); hiddenDialog = false }) { Text("Clear exclusions") } }, dismissButton = { TextButton(onClick = { hiddenDialog = false }) { Text("Cancel") } })
 
     if (settingsOpen) {
+        var settingsTab by rememberSaveable { mutableIntStateOf(0) }
         AlertDialog(
             onDismissRequest = { settingsOpen = false },
             title = { Text("Settings") },
             text = {
-                Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Folder library", style = MaterialTheme.typography.titleSmall)
-                    TextButton(onClick = { populate() }, enabled = !scanning) { Text(if (scanning) "Scanning…" else "Populate from folder") }
-                    TextButton(onClick = { hiddenDialog = true }) { Text("Clear removed-book exclusions") }
-                    Text("Library view", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = layoutMode == "cards", onClick = { layoutMode = "cards"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("Cards") })
-                        FilterChip(selected = layoutMode == "list", onClick = { layoutMode = "list"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("List") })
-                    }
-                    Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
-                    Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
-                    Text("Book progress", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = progressDisplay == "percent", onClick = { progressDisplay = "percent"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Percent") })
-                        FilterChip(selected = progressDisplay == "pages", onClick = { progressDisplay = "pages"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Pages") })
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Compact list progress", style = MaterialTheme.typography.titleSmall)
-                            Text("On small screens, show a percentage instead of a progress bar.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                        }
-                        Switch(checked = compactListProgress, onCheckedChange = { compactListProgress = it; settings.edit().putBoolean("compact_list_progress", it).apply() })
-                    }
-                    if (layoutMode == "cards") {
-                        Text("Card labels", style = MaterialTheme.typography.titleSmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = !coverOnlyCards, onClick = { coverOnlyCards = false; settings.edit().putBoolean("cover_only_cards", false).apply() }, label = { Text("Cover + title") })
-                            FilterChip(selected = coverOnlyCards, onClick = { coverOnlyCards = true; settings.edit().putBoolean("cover_only_cards", true).apply() }, label = { Text("Cover only") })
+                Column(Modifier.heightIn(max = 500.dp)) {
+                    ScrollableTabRow(selectedTabIndex = settingsTab, edgePadding = 0.dp) {
+                        listOf("Library", "Reader", "Data").forEachIndexed { index, title ->
+                            Tab(selected = settingsTab == index, onClick = { settingsTab = index }, text = { Text(title) })
                         }
                     }
-                    Text("App theme", style = MaterialTheme.typography.titleSmall)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-                        items(appThemes.size) { index ->
-                            val theme = appThemes[index]
-                            val selectedTheme = appTheme == theme.id || (appTheme == "paper" && theme.id == "quiet_light") || (appTheme == "dark" && theme.id == "quiet_dark")
-                            Surface(onClick = { appTheme = theme.id; settings.edit().putString("app_theme", theme.id).apply() }, shape = RoundedCornerShape(14.dp), color = Color(theme.surface), border = if (selectedTheme) androidx.compose.foundation.BorderStroke(2.dp, Color(theme.accent)) else androidx.compose.foundation.BorderStroke(1.dp, Color(theme.muted).copy(alpha = .35f)), modifier = Modifier.width(148.dp)) {
-                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text(theme.name, color = Color(theme.text), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(theme.background, theme.surface, theme.accent, theme.text).forEach { color -> Box(Modifier.size(16.dp).clip(RoundedCornerShape(50)).background(Color(color))) } }
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        when (settingsTab) {
+                            0 -> {
+                                Text("Folder library", style = MaterialTheme.typography.titleSmall)
+                                TextButton(onClick = { populate() }, enabled = !scanning) { Text(if (scanning) "Scanning…" else "Populate from folder") }
+                                TextButton(onClick = { hiddenDialog = true }) { Text("Clear removed-book exclusions") }
+                                Text("Library view", style = MaterialTheme.typography.titleSmall)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(selected = layoutMode == "cards", onClick = { layoutMode = "cards"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("Cards") })
+                                    FilterChip(selected = layoutMode == "list", onClick = { layoutMode = "list"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("List") })
+                                }
+                                Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
+                                Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
+                                Text("Book progress", style = MaterialTheme.typography.titleSmall)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(selected = progressDisplay == "percent", onClick = { progressDisplay = "percent"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Percent") })
+                                    FilterChip(selected = progressDisplay == "pages", onClick = { progressDisplay = "pages"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Pages") })
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) { Text("Compact list progress", style = MaterialTheme.typography.titleSmall); Text("On small screens, show a percentage instead of a progress bar.", style = MaterialTheme.typography.bodySmall, color = Muted) }
+                                    Switch(checked = compactListProgress, onCheckedChange = { compactListProgress = it; settings.edit().putBoolean("compact_list_progress", it).apply() })
+                                }
+                                if (layoutMode == "cards") {
+                                    Text("Card labels", style = MaterialTheme.typography.titleSmall)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterChip(selected = !coverOnlyCards, onClick = { coverOnlyCards = false; settings.edit().putBoolean("cover_only_cards", false).apply() }, label = { Text("Cover + title") })
+                                        FilterChip(selected = coverOnlyCards, onClick = { coverOnlyCards = true; settings.edit().putBoolean("cover_only_cards", true).apply() }, label = { Text("Cover only") })
+                                    }
+                                }
+                                Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                            }
+                            1 -> {
+                                Text("App theme", style = MaterialTheme.typography.titleSmall)
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+                                    items(appThemes.size) { index ->
+                                        val theme = appThemes[index]
+                                        val selectedTheme = appTheme == theme.id || (appTheme == "paper" && theme.id == "quiet_light") || (appTheme == "dark" && theme.id == "quiet_dark")
+                                        Surface(onClick = { appTheme = theme.id; settings.edit().putString("app_theme", theme.id).apply() }, shape = RoundedCornerShape(14.dp), color = Color(theme.surface), border = if (selectedTheme) androidx.compose.foundation.BorderStroke(2.dp, Color(theme.accent)) else androidx.compose.foundation.BorderStroke(1.dp, Color(theme.muted).copy(alpha = .35f)), modifier = Modifier.width(148.dp)) {
+                                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Text(theme.name, color = Color(theme.text), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(theme.background, theme.surface, theme.accent, theme.text).forEach { color -> Box(Modifier.size(16.dp).clip(RoundedCornerShape(50)).background(Color(color))) } }
+                                            }
+                                        }
+                                    }
+                                }
+                                Text("Global reader theme", style = MaterialTheme.typography.titleSmall)
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night").forEach { (key, label) ->
+                                        FilterChip(selected = readerTheme == key, onClick = {
+                                            readerTheme = key
+                                            val (background, foreground) = when (key) {
+                                                "white" -> android.graphics.Color.WHITE to android.graphics.Color.rgb(35,35,35)
+                                                "sepia" -> android.graphics.Color.rgb(244,232,207) to android.graphics.Color.rgb(71,55,39)
+                                                "night" -> android.graphics.Color.rgb(14,16,19) to android.graphics.Color.rgb(211,215,219)
+                                                else -> android.graphics.Color.rgb(250,249,246) to android.graphics.Color.rgb(43,42,39)
+                                            }
+                                            readerSettings.edit().putString("theme", key).putInt("background", background).putInt("foreground", foreground).apply()
+                                            settings.edit().putString("reader_theme", key).apply()
+                                        }, label = { Text(label) })
+                                    }
+                                }
+                                TextButton(onClick = { colorDialog = true }) { Text("Custom text and background colors") }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Column { Text("Reading font", style = MaterialTheme.typography.titleSmall); Text(if (readerFont.isBlank()) "Publisher default" else readerFont, style = MaterialTheme.typography.bodySmall, color = Muted) }
+                                    TextButton(onClick = { fontDialog = true }) { Text("Choose") }
+                                }
+                                Text("Text size · ${(readerFontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                                Slider(value = readerFontScale, onValueChange = { readerFontScale = it }, valueRange = .8f..1.8f, onValueChangeFinished = { readerSettings.edit().putFloat("font_scale", readerFontScale).apply() })
+                                Text("Line spacing · ${(readerLineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                                Slider(value = readerLineSpacing, onValueChange = { readerLineSpacing = it }, valueRange = 1f..2f, onValueChangeFinished = { readerSettings.edit().putFloat("line_spacing", readerLineSpacing).apply() })
+                                Text("Higher line spacing overrides publisher text styles in EPUBs.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                                Text("Default EPUB layout", style = MaterialTheme.typography.titleSmall)
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) ->
+                                        val selected = when (mode) { "double" -> readerTwoColumns && !readerContinuous; "continuous" -> readerContinuous; else -> !readerTwoColumns && !readerContinuous }
+                                        FilterChip(selected = selected, onClick = { readerTwoColumns = mode == "double"; readerContinuous = mode == "continuous"; readerSettings.edit().putBoolean("two_columns", readerTwoColumns).putBoolean("continuous", readerContinuous).apply() }, label = { Text(label) })
+                                    }
+                                }
+                                Text("Paginated by default. Continuous mode scrolls through long sections.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                                Text("Top reading margin · ${readerTopMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                                Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
+                                Text("Bottom reading margin · ${readerBottomMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                                Slider(value = readerBottomMargin, onValueChange = { readerBottomMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("bottom_margin_dp", readerBottomMargin).apply() })
+                            }
+                            else -> {
+                                Text("Reading backups include positions, bookmarks, shelves, and settings. Book files are not included; import your books before restoring on another device.", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { exportBackup.launch("Vellurix-backup.json") }) { Text("Export backup") }
+                                    OutlinedButton(onClick = { importBackup.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }) { Text("Import backup") }
                                 }
                             }
                         }
                     }
-                    Text("Global reader theme", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night").forEach { (key, label) ->
-                            FilterChip(selected = readerTheme == key, onClick = {
-                                readerTheme = key
-                                val (background, foreground) = when (key) {
-                                    "white" -> android.graphics.Color.WHITE to android.graphics.Color.rgb(35,35,35)
-                                    "sepia" -> android.graphics.Color.rgb(244,232,207) to android.graphics.Color.rgb(71,55,39)
-                                    "night" -> android.graphics.Color.rgb(14,16,19) to android.graphics.Color.rgb(211,215,219)
-                                    else -> android.graphics.Color.rgb(250,249,246) to android.graphics.Color.rgb(43,42,39)
-                                }
-                                context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putString("theme", key).putInt("background", background).putInt("foreground", foreground).apply()
-                                settings.edit().putString("reader_theme", key).apply()
-                            }, label = { Text(label) })
-                        }
-                    }
-                    TextButton(onClick = { colorDialog = true }) { Text("Custom text and background colors") }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            Text("Reading font", style = MaterialTheme.typography.titleSmall)
-                            Text(if (readerFont.isBlank()) "Publisher default" else readerFont, style = MaterialTheme.typography.bodySmall, color = Muted)
-                        }
-                        TextButton(onClick = { fontDialog = true }) { Text("Choose") }
-                    }
-                    Text("Text size · ${(readerFontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                    Slider(value = readerFontScale, onValueChange = { readerFontScale = it }, valueRange = .8f..1.8f, onValueChangeFinished = {
-                        context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("font_scale", readerFontScale).apply()
-                    })
-                    Text("Line spacing · ${(readerLineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                    Slider(value = readerLineSpacing, onValueChange = { readerLineSpacing = it }, valueRange = 1f..2f, onValueChangeFinished = {
-                        readerSettings.edit().putFloat("line_spacing", readerLineSpacing).apply()
-                    })
-                    Text("Higher line spacing overrides publisher text styles in EPUBs.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                    Text("Default EPUB layout", style = MaterialTheme.typography.titleSmall)
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) ->
-                            val selected = when (mode) { "double" -> readerTwoColumns && !readerContinuous; "continuous" -> readerContinuous; else -> !readerTwoColumns && !readerContinuous }
-                            FilterChip(selected = selected, onClick = {
-                                readerTwoColumns = mode == "double"; readerContinuous = mode == "continuous"
-                                readerSettings.edit().putBoolean("two_columns", readerTwoColumns).putBoolean("continuous", readerContinuous).apply()
-                            }, label = { Text(label) })
-                        }
-                    }
-                    Text("Paginated by default. Continuous mode scrolls through long sections.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                    Text("Top reading margin · ${readerTopMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                    Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
-                    Text("Bottom reading margin · ${readerBottomMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                    Slider(value = readerBottomMargin, onValueChange = { readerBottomMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("bottom_margin_dp", readerBottomMargin).apply() })
-                    Text("Backup", style = MaterialTheme.typography.titleSmall)
-                    Text("Backups include reading positions, bookmarks, shelves, and settings. Book files are not included; import your books before restoring on another device.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { exportBackup.launch("Vellurix-backup.json") }) { Text("Export backup") }
-                        OutlinedButton(onClick = { importBackup.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }) { Text("Import backup") }
-                    }
-                    Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             },
             confirmButton = { TextButton(onClick = { settingsOpen = false }) { Text("Done") } },
@@ -694,6 +700,9 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
         )
     }
 }
+
+internal fun resolveSelectedShelf(saved: String?, shelves: List<String>): String =
+    saved?.takeIf { it == "All books" || it in shelves } ?: "All books"
 
 private suspend fun scanFolder(context: android.content.Context, uri: Uri): List<Triple<Uri, String, String>> = withContext(Dispatchers.IO) {
     val root = DocumentFile.fromTreeUri(context, uri) ?: error("The selected folder is unavailable.")
