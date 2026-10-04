@@ -7,7 +7,9 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
@@ -19,11 +21,13 @@ import java.io.File
 import java.util.zip.ZipFile
 
 @Composable
-internal fun BookCover(item: CoverBookInfo, modifier: Modifier = Modifier) {
+internal fun BookCover(item: CoverBookInfo, modifier: Modifier = Modifier, onDominantColor: ((Int) -> Unit)? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val bitmap = produceState<Bitmap?>(null, item.uri, item.format) {
         value = withContext(Dispatchers.IO) { extractCover(context.applicationContext, item.uri, item.format) }
     }.value
+    val tone = remember(bitmap) { bitmap?.let(::dominantColor) }
+    SideEffect { tone?.let { onDominantColor?.invoke(it) } }
     if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = "Cover of ${item.title}", modifier = modifier, contentScale = ContentScale.Crop)
 }
 
@@ -120,4 +124,22 @@ private fun normalizeZipPath(path: String): String {
         }
     }
     return segments.joinToString("/")
+}
+
+private fun dominantColor(bitmap: Bitmap): Int {
+    val buckets = HashMap<Int, Int>()
+    val step = maxOf(bitmap.width, bitmap.height) / 28.coerceAtLeast(1)
+    for (y in 0 until bitmap.height step step.coerceAtLeast(1)) {
+        for (x in 0 until bitmap.width step step.coerceAtLeast(1)) {
+            val pixel = bitmap.getPixel(x, y)
+            if (android.graphics.Color.alpha(pixel) < 220) continue
+            val red = android.graphics.Color.red(pixel) shr 4
+            val green = android.graphics.Color.green(pixel) shr 4
+            val blue = android.graphics.Color.blue(pixel) shr 4
+            val key = (red shl 8) or (green shl 4) or blue
+            buckets[key] = (buckets[key] ?: 0) + 1
+        }
+    }
+    val key = buckets.maxByOrNull { it.value }?.key ?: return android.graphics.Color.rgb(154, 91, 69)
+    return android.graphics.Color.rgb(((key shr 8) and 15) * 17, ((key shr 4) and 15) * 17, (key and 15) * 17)
 }

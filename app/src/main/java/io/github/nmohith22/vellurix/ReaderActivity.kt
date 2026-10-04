@@ -51,6 +51,7 @@ import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.shared.util.toAbsoluteUrl
+import org.readium.r2.shared.util.toUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
@@ -321,7 +322,9 @@ private class ReaderHostFragment : Fragment() {
                 if (format !in setOf("EPUB", "PDF")) error("$format reading is not available yet.")
                 val httpClient = DefaultHttpClient()
                 val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
-                val url = uri.toAbsoluteUrl() ?: error("Invalid file location")
+                val url = if (uri.scheme == "file") {
+                    java.io.File(uri.path ?: error("Invalid local file location")).toUrl(isDirectory = false)
+                } else uri.toAbsoluteUrl() ?: error("Invalid file location")
                 val asset = assetRetriever.retrieve(url).getOrElse { error("The file could not be read.") }
                 val parser = DefaultPublicationParser(context, httpClient, assetRetriever, PdfiumDocumentFactory(context))
                 val publication = PublicationOpener(parser).open(asset, allowUserInteraction = true).getOrElse { error("This ${format.ifBlank { "file" }} could not be opened by the reader.") }
