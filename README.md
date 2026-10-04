@@ -4,7 +4,7 @@ An offline-first Android reader for EPUB, PDF, TXT, HTML, FB2, and basic RTF. It
 
 ## Download
 
-**[Download Vellurix 0.1.15 for Android](https://github.com/nmohith22/Vellurix/raw/refs/heads/main/release/Vellurix-0.1.15.apk)**
+**[Download Vellurix 0.1.16 for Android](https://github.com/nmohith22/Vellurix/raw/refs/heads/main/release/Vellurix-0.1.16.apk)**
 
 Download the APK on your Android device, open it from Downloads, and follow Android's install prompt. Install it over your existing Vellurix app without uninstalling first to keep its local library, shelves, settings, widgets, and reading progress. Android may ask you to allow your browser or file manager to install apps from that source.
 

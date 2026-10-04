@@ -14,10 +14,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -44,6 +56,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -296,33 +309,52 @@ private fun FolioApp(resumeTick: Int) {
                 }
             }
             val recentBook = books.firstOrNull { it.uri == recentBookUri }
-            if (recentBook != null && !searchOpen) {
-                val recentProgress = loadBookProgress(context, recentBook.uri)
-                Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).clickable { openBook(recentBook) }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.size(width = 44.dp, height = 60.dp).clip(RoundedCornerShape(8.dp)).background(Brush.verticalGradient(CoverColors[(recentBook.title.hashCode() and Int.MAX_VALUE) % CoverColors.size].let { listOf(it.first, it.second) }))) {
-                            BookCover(recentBook, Modifier.fillMaxSize())
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("CONTINUE READING", style = MaterialTheme.typography.labelSmall, color = appAccent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Text(recentBook.title, style = MaterialTheme.typography.titleSmall, color = appColors.third, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(progressLabel(recentProgress, progressDisplay), style = MaterialTheme.typography.bodySmall, color = Muted)
-                            LinearProgressIndicator(progress = { recentProgress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = appAccent, trackColor = appAccent.copy(alpha = .18f))
+            AnimatedVisibility(
+                visible = recentBook != null && !searchOpen,
+                enter = fadeIn(tween(220, delayMillis = 40)) + slideInVertically(tween(260)) { -it / 5 } + expandVertically(),
+                exit = fadeOut(tween(120)) + shrinkVertically(),
+            ) {
+                if (recentBook != null) {
+                    val recentProgress = loadBookProgress(context, recentBook.uri)
+                    Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).clickable { openBook(recentBook) }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.size(width = 44.dp, height = 60.dp).clip(RoundedCornerShape(8.dp)).background(Brush.verticalGradient(CoverColors[(recentBook.title.hashCode() and Int.MAX_VALUE) % CoverColors.size].let { listOf(it.first, it.second) }))) {
+                                BookCover(recentBook, Modifier.fillMaxSize())
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("CONTINUE READING", style = MaterialTheme.typography.labelSmall, color = appAccent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text(recentBook.title, style = MaterialTheme.typography.titleSmall, color = appColors.third, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(progressLabel(recentProgress, progressDisplay), style = MaterialTheme.typography.bodySmall, color = Muted)
+                                LinearProgressIndicator(progress = { recentProgress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = appAccent, trackColor = appAccent.copy(alpha = .18f))
+                            }
                         }
                     }
                 }
+                }
             }
-            AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(), exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()) {
+            AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top, animationSpec = tween(220)) + expandHorizontally(expandFrom = Alignment.End, animationSpec = tween(220)) + fadeIn(tween(160)), exit = shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(180)) + shrinkHorizontally(shrinkTowards = Alignment.End, animationSpec = tween(180)) + fadeOut(tween(120))) {
                 OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).focusRequester(searchFocus), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, trailingIcon = { IconButton(onClick = { search = ""; searchOpen = false }) { Icon(Icons.Rounded.Close, "Close search") } }, shape = RoundedCornerShape(18.dp))
             }
-            if (selectedBooks.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${selectedBooks.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = appColors.third)
-                TextButton(onClick = { bulkShelfDialog = true }) { Text("Move to shelf") }
-                TextButton(onClick = { selectedBooks.clear() }) { Text("Cancel") }
+            AnimatedVisibility(
+                visible = selectedBooks.isNotEmpty(),
+                enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { -it / 3 } + expandVertically(),
+                exit = fadeOut(tween(110)) + shrinkVertically(),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${selectedBooks.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = appColors.third)
+                    TextButton(onClick = { bulkShelfDialog = true }) { Text("Move to shelf") }
+                    TextButton(onClick = { selectedBooks.clear() }) { Text("Cancel") }
+                }
             }
             LazyRow(modifier = Modifier.padding(bottom = 12.dp), contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(shelves.size) { index ->
                     val shelf = shelves[index]
+                    val isSelected = shelf == selectedShelf
+                    val chipColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                        animationSpec = tween(180),
+                        label = "shelf selection color",
+                    )
                     Surface(
                         modifier = Modifier.combinedClickable(
                             onClick = { selectedShelf = shelf },
@@ -334,39 +366,51 @@ private fun FolioApp(resumeTick: Int) {
                             }
                         ),
                         shape = RoundedCornerShape(8.dp),
-                        color = if (shelf == selectedShelf) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                        color = chipColor,
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (shelf == selectedShelf) Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                            AnimatedVisibility(isSelected, enter = fadeIn(tween(120)) + expandHorizontally(tween(150)), exit = fadeOut(tween(80)) + shrinkHorizontally(tween(120))) {
+                                Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                            }
                             Text(shelf, style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }
                 item { Surface(modifier = Modifier.clickable { shelfDialog = true }, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(Icons.Rounded.Add, null, Modifier.size(16.dp)); Text("New shelf", style = MaterialTheme.typography.labelLarge) } } }
             }
-            if (visibleBooks.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Icon(Icons.Rounded.AutoStories, null, Modifier.size(42.dp), tint = appAccent)
-                        Text(if (books.isEmpty()) "A quieter place to read" else "No books in this shelf", style = MaterialTheme.typography.titleLarge, color = Ink)
-                        Text(if (books.isEmpty()) "Import a book or scan a folder you choose." else "Choose another shelf or add a book.", style = MaterialTheme.typography.bodyMedium, color = Muted)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import book") }
-                            FilledTonalButton(onClick = ::populate) { Text("Populate library") }
+            AnimatedContent(
+                targetState = layoutMode to visibleBooks.isEmpty(),
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    (fadeIn(tween(180)) + scaleIn(initialScale = .985f, animationSpec = tween(220))) togetherWith
+                        (fadeOut(tween(120)) + scaleOut(targetScale = .99f, animationSpec = tween(160)))
+                },
+                label = "library content",
+            ) { (displayMode, isEmpty) ->
+                if (isEmpty) {
+                    Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Icon(Icons.Rounded.AutoStories, null, Modifier.size(42.dp), tint = appAccent)
+                            Text(if (books.isEmpty()) "A quieter place to read" else "No books in this shelf", style = MaterialTheme.typography.titleLarge, color = Ink)
+                            Text(if (books.isEmpty()) "Import a book or scan a folder you choose." else "Choose another shelf or add a book.", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import book") }
+                                FilledTonalButton(onClick = ::populate) { Text("Populate library") }
+                            }
                         }
                     }
-                }
-            } else {
-                if (layoutMode == "cards") {
-                    LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book }) }
-                    }
                 } else {
-                    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
-                            val book = visibleBooks[index]
-                            BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
+                    if (displayMode == "cards") {
+                        LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, modifier = Modifier.animateItem(fadeInSpec = tween(180), fadeOutSpec = tween(110), placementSpec = spring(stiffness = Spring.StiffnessMediumLow)), onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book }) }
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
+                                val book = visibleBooks[index]
+                                BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, modifier = Modifier.animateItem(fadeInSpec = tween(180), fadeOutSpec = tween(110), placementSpec = spring(stiffness = Spring.StiffnessMediumLow)), onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
+                            }
                         }
                     }
                 }
@@ -693,11 +737,12 @@ private fun loadBookProgress(context: android.content.Context, uri: String): Boo
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, selected: Boolean, progress: BookProgress, progressDisplay: String, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, selected: Boolean, progress: BookProgress, progressDisplay: String, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(colors.first) }
-    val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
-    Card(modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = cardColor), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+    val cardColor by animateColorAsState(androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f), tween(260), label = "book cover tint")
+    val pressScale by animateFloatAsState(if (selected) .985f else 1f, spring(stiffness = Spring.StiffnessMedium), label = "book selection scale")
+    Card(modifier = modifier.graphicsLayer { scaleX = pressScale; scaleY = pressScale }.combinedClickable(onClick = onClick, onLongClick = onLongClick), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = cardColor), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column(Modifier.padding((10 * size).dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second)))) {
                 BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) })
@@ -715,11 +760,12 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: B
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, progress: BookProgress, progressDisplay: String, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, progress: BookProgress, progressDisplay: String, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
     val fallback = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(fallback.first) }
-    val rowColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
-    Card(modifier = Modifier.fillMaxWidth().height((110 * size).dp).combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = rowColor)) {
+    val rowColor by animateColorAsState(androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f), tween(260), label = "book row cover tint")
+    val pressScale by animateFloatAsState(if (selected) .99f else 1f, spring(stiffness = Spring.StiffnessMedium), label = "book row selection scale")
+    Card(modifier = modifier.fillMaxWidth().height((110 * size).dp).graphicsLayer { scaleX = pressScale; scaleY = pressScale }.combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = rowColor)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxSize().padding(10.dp)) {
             Box(Modifier.width((54 * size).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(fallback.first, fallback.second)))) { BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) }) }
             Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
