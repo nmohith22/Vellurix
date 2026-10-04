@@ -1,4 +1,4 @@
-﻿package io.github.nmohith22.vellurix
+package io.github.nmohith22.vellurix
 
 import android.content.Intent
 import android.net.Uri
@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.AnimatedVisibility
@@ -125,6 +126,7 @@ private fun FolioApp(resumeTick: Int) {
     var shelfDialog by remember { mutableStateOf(false) }
     var hiddenDialog by remember { mutableStateOf(false) }
     var shelfName by remember { mutableStateOf("") }
+    var shelfRenameTarget by remember { mutableStateOf<String?>(null) }
     var selectedBook by remember { mutableStateOf<BookItem?>(null) }
     val selectedBooks = remember { mutableStateListOf<String>() }
     var bulkShelfDialog by remember { mutableStateOf(false) }
@@ -300,9 +302,27 @@ private fun FolioApp(resumeTick: Int) {
             LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(shelves.size) { index ->
                     val shelf = shelves[index]
-                    AssistChip(onClick = { selectedShelf = shelf }, label = { Text(shelf) }, leadingIcon = if (shelf == selectedShelf) ({ Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }) else null)
+                    Surface(
+                        modifier = Modifier.combinedClickable(
+                            onClick = { selectedShelf = shelf },
+                            onLongClick = {
+                                if (shelf != "All books") {
+                                    shelfName = shelf
+                                    shelfRenameTarget = shelf
+                                }
+                            }
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (shelf == selectedShelf) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (shelf == selectedShelf) Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                            Text(shelf, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
                 }
-                item { AssistChip(onClick = { shelfDialog = true }, label = { Text("New shelf") }, leadingIcon = { Icon(Icons.Rounded.Add, null, Modifier.size(16.dp)) }) }
+                item { Surface(modifier = Modifier.clickable { shelfDialog = true }, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(Icons.Rounded.Add, null, Modifier.size(16.dp)); Text("New shelf", style = MaterialTheme.typography.labelLarge) } } }
             }
             if (visibleBooks.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
@@ -333,13 +353,27 @@ private fun FolioApp(resumeTick: Int) {
         }
     }
 
-    if (shelfDialog) AlertDialog(onDismissRequest = { shelfDialog = false; shelfName = "" }, title = { Text("Create a shelf") }, text = { OutlinedTextField(shelfName, { shelfName = it }, singleLine = true, label = { Text("Shelf name") }) }, confirmButton = {
+    if (shelfDialog || shelfRenameTarget != null) AlertDialog(onDismissRequest = { shelfDialog = false; shelfRenameTarget = null; shelfName = "" }, title = { Text(if (shelfRenameTarget != null) "Rename shelf" else "Create a shelf") }, text = { OutlinedTextField(shelfName, { shelfName = it }, singleLine = true, label = { Text("Shelf name") }) }, confirmButton = {
         TextButton(onClick = {
             val name = shelfName.trim()
-            if (name.isNotEmpty() && shelves.none { it.equals(name, true) }) { shelves.add(name); store.saveShelves(shelves.drop(1)); refreshHomeWidgets(context.applicationContext); selectedShelf = name }
-            shelfName = ""; shelfDialog = false
-        }) { Text("Create") }
-    }, dismissButton = { TextButton(onClick = { shelfDialog = false; shelfName = "" }) { Text("Cancel") } })
+            if (name.isNotEmpty() && shelves.none { it.equals(name, true) }) {
+                if (shelfRenameTarget != null) {
+                    val target = shelfRenameTarget!!
+                    val index = shelves.indexOf(target)
+                    if (index >= 0) {
+                        shelves[index] = name
+                        store.saveShelves(shelves.drop(1))
+                        if (selectedShelf == target) selectedShelf = name
+                        books.indices.forEach { i -> if (books[i].shelf == target) books[i] = books[i].copy(shelf = name) }
+                        saveBooks()
+                    }
+                } else {
+                    shelves.add(name); store.saveShelves(shelves.drop(1)); refreshHomeWidgets(context.applicationContext); selectedShelf = name
+                }
+            }
+            shelfName = ""; shelfDialog = false; shelfRenameTarget = null
+        }) { Text(if (shelfRenameTarget != null) "Rename" else "Create") }
+    }, dismissButton = { TextButton(onClick = { shelfDialog = false; shelfRenameTarget = null; shelfName = "" }) { Text("Cancel") } })
 
     if (hiddenDialog) AlertDialog(onDismissRequest = { hiddenDialog = false }, title = { Text("Clear removed-book exclusions?") }, text = { Text("Previously removed books can appear again the next time you populate the selected folder.") }, confirmButton = { TextButton(onClick = { store.saveExclusions(emptySet()); hiddenDialog = false }) { Text("Clear exclusions") } }, dismissButton = { TextButton(onClick = { hiddenDialog = false }) { Text("Cancel") } })
 

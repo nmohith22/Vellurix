@@ -1,4 +1,4 @@
-﻿package io.github.nmohith22.vellurix
+package io.github.nmohith22.vellurix
 
 import android.content.pm.ActivityInfo
 import android.graphics.Color as AndroidColor
@@ -103,12 +103,7 @@ class ReaderActivity : FragmentActivity() {
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
         containerId = READER_CONTAINER_ID
         val root = FrameLayout(this).apply { setBackgroundColor(AndroidColor.rgb(250, 249, 246)) }
-        root.setOnApplyWindowInsetsListener { target, insets ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                insets.displayCutout?.let { cutout -> target.setPadding(cutout.safeInsetLeft, cutout.safeInsetTop, cutout.safeInsetRight, cutout.safeInsetBottom) }
-            }
-            insets
-        }
+
         root.addView(FrameLayout(this).apply { id = containerId }, FrameLayout.LayoutParams(-1, -1))
         val overlay = PassThroughComposeContainer(this) { event ->
             drawerOpen || settingsOpen || (controlsVisible && (event.y <= 140 * resources.displayMetrics.density || event.y >= root.height - 180 * resources.displayMetrics.density)) || event.x <= 30 * resources.displayMetrics.density
@@ -194,6 +189,7 @@ class ReaderActivity : FragmentActivity() {
         customizeThisBook = bookSettingsShortcut || getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean("customize_this_book", false)
         settingsOpen = bookSettingsShortcut
         appearance = loadReaderAppearance(this, uri.toString())
+        window.decorView.setBackgroundColor(appearance!!.background)
         twoColumns = getScopedBoolean("two_columns", false)
         transition = getSharedPreferences("reader_settings", MODE_PRIVATE).getString("page_transition", "page turn") ?: "page turn"
         applyRotation()
@@ -239,6 +235,7 @@ class ReaderActivity : FragmentActivity() {
             if (previous?.topMarginDp != value.topMarginDp) editor.putFloat(prefix + "top_margin_dp", value.topMarginDp)
             if (previous?.bottomMarginDp != value.bottomMarginDp) editor.putFloat(prefix + "bottom_margin_dp", value.bottomMarginDp)
         }.apply()
+        window.decorView.setBackgroundColor(value.background)
         (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance()
     }
 
@@ -687,6 +684,7 @@ internal fun parseSavedLocator(json: String?): org.readium.r2.shared.publication
 private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
     backgroundColor = ReadiumColor(appearance.background),
     columnCount = if (appearance.twoColumns) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
+    spread = if (appearance.twoColumns) org.readium.r2.navigator.preferences.Spread.ALWAYS else org.readium.r2.navigator.preferences.Spread.NEVER,
     textColor = ReadiumColor(appearance.foreground),
     theme = when (appearance.theme) { "sepia" -> Theme.SEPIA; "night", "forest", "slate", "custom" -> Theme.DARK; else -> Theme.LIGHT },
     fontFamily = when (appearance.fontFamily) {

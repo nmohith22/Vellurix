@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.nmohith22.vellurix"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.1.12"
+        versionCode = 14
+        versionName = "0.1.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

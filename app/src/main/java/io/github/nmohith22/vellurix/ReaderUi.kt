@@ -145,13 +145,14 @@ internal fun ReaderOverlay(
                 ) {
                     Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = fg, modifier = Modifier.size(30.dp)) }
-                        AnimatedContent(targetState = themeCarousel, label = "reader themes", modifier = Modifier.weight(1f)) { expanded ->
-                            if (expanded) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
+                        AnimatedVisibility(visible = !themeCarousel) { IconButton(modifier = Modifier.size(40.dp), onClick = { themeCarousel = true }) { Icon(Icons.Rounded.ColorLens, "Theme", tint = fg) } }
+                        AnimatedVisibility(visible = themeCarousel, modifier = Modifier.weight(1f)) {
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
                                 listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) ->
                                     val pair = readerPreset(id)
                                     Surface(onClick = { onTheme(id); themeCarousel = false }, color = Color(pair.first), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(label, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(pair.second), style = MaterialTheme.typography.labelSmall) }
                                 }
-                            } else FilledTonalButton(onClick = { themeCarousel = true }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp), shape = CircleShape) { Icon(Icons.Rounded.ColorLens, null, Modifier.size(18.dp)); Spacer(Modifier.width(5.dp)); Text("Theme") }
+                            }
                         }
                         IconButton(modifier = Modifier.size(40.dp), onClick = onRotate) { Icon(if (autoRotate) Icons.Rounded.ScreenRotation else Icons.Rounded.ScreenLockPortrait, if (autoRotate) "Auto rotate on" else "Portrait locked", tint = if (autoRotate) accent else fg) }
                         IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = false; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.MenuBook, "Contents", tint = fg) }
