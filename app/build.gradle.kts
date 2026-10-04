@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.nmohith22.vellurix"
         minSdk = 24
         targetSdk = 36
-        versionCode = 23
-        versionName = "0.1.22"
+        versionCode = 24
+        versionName = "0.1.23"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
