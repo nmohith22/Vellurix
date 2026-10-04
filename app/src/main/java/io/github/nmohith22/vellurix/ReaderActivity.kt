@@ -1008,7 +1008,7 @@ private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, 
     EpubNavigatorFragment.Configuration().apply {
         readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) {
             org.readium.r2.navigator.epub.css.RsProperties(
-                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(49.5),
+                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(49.75),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
             )
         } else {

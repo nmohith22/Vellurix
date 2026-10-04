@@ -31,7 +31,7 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 - Book and shelf widgets show book covers, resize with the launcher, and open the selected book when tapped. The picker shows cover previews and keeps clear of display cutouts.
 - Swipe horizontally through every book in a shelf widget; each book tile shows only its cover, and tapping it opens that book.
 - Export and import JSON backups for reading positions, bookmarks, shelves, library settings, and reader customization. Backups map existing EPUB/PDF files by content hash and do not contain book files; add those books to the library before restoring on another device.
-- The launcher icon uses an orange and black book design by default and supports One UI themed icons.
+- The launcher icon uses an orange and black book design by default; its One UI monochrome version keeps page lines and the center spine as cutout details.
 - Scrub through a book from the reader's chapter-segmented progress seeker; it previews the section under your finger and navigates when released.
 
 ## License
