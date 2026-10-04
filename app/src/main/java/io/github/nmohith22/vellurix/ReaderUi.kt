@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -81,7 +83,7 @@ internal fun ReaderOverlay(
     onCustomizeBook: (Boolean) -> Unit,
     onResetBook: () -> Unit,
     onTransition: (String) -> Unit,
-    onColumns: (Boolean) -> Unit,
+    onReadingMode: (String) -> Unit,
 ) {
     var bookmarkTab by remember { mutableStateOf(false) }
     var themeCarousel by remember { mutableStateOf(false) }
@@ -203,95 +205,51 @@ internal fun ReaderOverlay(
     }
 
     if (settingsOpen) ReaderSettingsDialog(
-        appearance, customizeBook, transition, twoColumns, supportsTwoColumns, onDismiss = { onSettingsOpenChange(false) },
+        appearance, customizeBook, transition, supportsTwoColumns, onDismiss = { onSettingsOpenChange(false) },
         onAppearance = onAppearance, onCustomizeBook = onCustomizeBook, onResetBook = onResetBook,
-        onTransition = onTransition, onColumns = onColumns,
+        onTransition = onTransition, onReadingMode = onReadingMode,
     )
 }
 
 @Composable
-private fun ReaderSettingsDialog(
-    current: ReaderAppearance,
-    customizeBook: Boolean,
-    transition: String,
-    twoColumns: Boolean,
-    supportsTwoColumns: Boolean,
-    onDismiss: () -> Unit,
-    onAppearance: (ReaderAppearance) -> Unit,
-    onCustomizeBook: (Boolean) -> Unit,
-    onResetBook: () -> Unit,
-    onTransition: (String) -> Unit,
-    onColumns: (Boolean) -> Unit,
-) {
+private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boolean, transition: String, supportsTwoColumns: Boolean, onDismiss: () -> Unit, onAppearance: (ReaderAppearance) -> Unit, onCustomizeBook: (Boolean) -> Unit, onResetBook: () -> Unit, onTransition: (String) -> Unit, onReadingMode: (String) -> Unit) {
     var appearance by remember(current) { mutableStateOf(current) }
     var fontMenu by remember { mutableStateOf(false) }
+    var colorTarget by remember { mutableStateOf("background") }
     val fonts = listOf("" to "Publisher default", "serif" to "Serif", "sans-serif" to "Sans serif", "cursive" to "Cursive", "fantasy" to "Fantasy", "monospace" to "Monospace", "OpenDyslexic" to "OpenDyslexic", "AccessibleDfA" to "Accessible DfA", "iA Writer Duospace" to "iA Writer Duospace")
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Reading experience", fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("Customize this book", style = MaterialTheme.typography.titleSmall); Text("Otherwise these settings follow your global defaults", style = MaterialTheme.typography.bodySmall) }
-                    Switch(checked = customizeBook, onCheckedChange = onCustomizeBook)
-                }
-                Surface(shape = RoundedCornerShape(16.dp), color = Color(appearance.background), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("LIVE PREVIEW", color = Color(appearance.foreground).copy(alpha = .65f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
-                        Text("A chapter begins here", color = Color(appearance.foreground), fontSize = (16 * appearance.fontScale).sp, fontWeight = FontWeight.SemiBold)
-                        Text("Your colors, typeface and text size update as you change them.", color = Color(appearance.foreground).copy(alpha = .82f), fontSize = (13 * appearance.fontScale).sp, maxLines = 2)
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 700.dp
+            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = if (wide) .10f else .34f)))
+            Surface(modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(440.dp).fillMaxHeight().padding(vertical = 12.dp, horizontal = 14.dp) else Modifier.align(Alignment.Center).fillMaxWidth(.94f).widthIn(max = 560.dp).heightIn(max = maxHeight - 32.dp), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 22.dp) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Reading experience", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold); IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Close settings") } }
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Customize this book", style = MaterialTheme.typography.titleSmall); Text("Otherwise global defaults apply", style = MaterialTheme.typography.bodySmall) }; Switch(checked = customizeBook, onCheckedChange = onCustomizeBook) }
+                        Surface(shape = RoundedCornerShape(16.dp), color = Color(appearance.background), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("LIVE PREVIEW", color = Color(appearance.foreground).copy(alpha = .65f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp); Text("A chapter begins here", color = Color(appearance.foreground), fontSize = (16 * appearance.fontScale).sp, fontWeight = FontWeight.SemiBold); Text("Your colors, typeface, spacing and text size update as you change them.", color = Color(appearance.foreground).copy(alpha = .82f), fontSize = (13 * appearance.fontScale).sp, maxLines = 2) } }
+                        Text("Reading theme", style = MaterialTheme.typography.titleSmall)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) -> val colors = readerPreset(id); Surface(onClick = { appearance = appearance.copy(theme = id, background = colors.first, foreground = colors.second); onAppearance(appearance) }, shape = RoundedCornerShape(14.dp), color = Color(colors.first), border = if (appearance.theme == id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Text(label, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(colors.second), style = MaterialTheme.typography.labelMedium) } } }
+                        Text("Text size · ${(appearance.fontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.fontScale, onValueChange = { appearance = appearance.copy(fontScale = it); onAppearance(appearance) }, valueRange = .8f..2f)
+                        if (supportsTwoColumns) { Text("Page layout", style = MaterialTheme.typography.titleSmall); Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) -> val selected = when (mode) { "double" -> appearance.twoColumns && !appearance.continuous; "continuous" -> appearance.continuous; else -> !appearance.twoColumns && !appearance.continuous }; FilterChip(selected = selected, onClick = { onReadingMode(mode) }, label = { Text(label) }) } }; Text("Paginated by default. Continuous mode scrolls through a long section.", style = MaterialTheme.typography.bodySmall) }
+                        Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Typeface", style = MaterialTheme.typography.titleSmall); Text(fonts.firstOrNull { it.first == appearance.fontFamily }?.second ?: "Publisher default", style = MaterialTheme.typography.bodySmall) }; Box { TextButton(onClick = { fontMenu = true }) { Text("Change") }; DropdownMenu(expanded = fontMenu, onDismissRequest = { fontMenu = false }) { fonts.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { appearance = appearance.copy(fontFamily = value); onAppearance(appearance); fontMenu = false }) } } } }
+                        Text("Top margin · ${appearance.topMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.topMarginDp, onValueChange = { appearance = appearance.copy(topMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f)
+                        Text("Bottom margin · ${appearance.bottomMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.bottomMarginDp, onValueChange = { appearance = appearance.copy(bottomMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f)
+                        Text("Page transition", style = MaterialTheme.typography.titleSmall)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) { listOf("none", "fade", "slide", "page turn").forEach { mode -> FilterChip(selected = transition == mode, onClick = { onTransition(mode) }, label = { Text(mode.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall) }) } }
+                        Text("Colors", style = MaterialTheme.typography.titleSmall)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = colorTarget == "background", onClick = { colorTarget = "background" }, label = { Text("Page") }); FilterChip(selected = colorTarget == "foreground", onClick = { colorTarget = "foreground" }, label = { Text("Text") }); Box(Modifier.size(30.dp).clip(CircleShape).background(Color(if (colorTarget == "background") appearance.background else appearance.foreground))) }
+                        ReaderColorWheel(Modifier.fillMaxWidth().height(180.dp)) { color -> appearance = if (colorTarget == "background") appearance.copy(theme = "custom", background = color) else appearance.copy(theme = "custom", foreground = color); onAppearance(appearance) }
+                        if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = onDismiss) { Text("Done") } }
                 }
-                Text("Reading theme", style = MaterialTheme.typography.titleSmall)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) ->
-                        val colors = readerPreset(id)
-                        Surface(onClick = { appearance = appearance.copy(theme = id, background = colors.first, foreground = colors.second); onAppearance(appearance) }, shape = RoundedCornerShape(14.dp), color = Color(colors.first), border = if (appearance.theme == id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                            Text(label, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(colors.second), style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Text size and zoom: ${(appearance.fontScale * 100).toInt()}%", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                }
-                Slider(value = appearance.fontScale, onValueChange = { appearance = appearance.copy(fontScale = it); onAppearance(appearance) }, valueRange = .8f..2f)
-                if (supportsTwoColumns) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.ViewColumn, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) { Text("Two columns", style = MaterialTheme.typography.titleSmall); Text("Paginated EPUB reading", style = MaterialTheme.typography.bodySmall) }
-                    Switch(checked = twoColumns, onCheckedChange = onColumns)
-                }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("Typeface", style = MaterialTheme.typography.titleSmall); Text(fonts.firstOrNull { it.first == appearance.fontFamily }?.second ?: "Publisher default", style = MaterialTheme.typography.bodySmall) }
-                    Box {
-                        TextButton(onClick = { fontMenu = true }) { Text("Change") }
-                        DropdownMenu(expanded = fontMenu, onDismissRequest = { fontMenu = false }) { fonts.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { appearance = appearance.copy(fontFamily = value); onAppearance(appearance); fontMenu = false }) } }
-                    }
-                }
-                Text("Page transition", style = MaterialTheme.typography.titleSmall)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    listOf("none", "fade", "slide", "page turn").forEach { mode -> FilterChip(selected = transition == mode, onClick = { onTransition(mode) }, label = { Text(mode.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall) }) }
-                }
-                Text("Colors", style = MaterialTheme.typography.titleSmall)
-                var colorTarget by remember { mutableStateOf("background") }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = colorTarget == "background", onClick = { colorTarget = "background" }, label = { Text("Page") })
-                    FilterChip(selected = colorTarget == "foreground", onClick = { colorTarget = "foreground" }, label = { Text("Text") })
-                    Box(Modifier.size(30.dp).clip(CircleShape).background(Color(if (colorTarget == "background") appearance.background else appearance.foreground)))
-                }
-                ReaderColorWheel(Modifier.fillMaxWidth().height(180.dp)) { color ->
-                    appearance = if (colorTarget == "background") appearance.copy(theme = "custom", background = color) else appearance.copy(theme = "custom", foreground = color)
-                    onAppearance(appearance)
-                }
-                if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
+        }
+    }
 }
-
 @Composable
 private fun ReaderColorWheel(modifier: Modifier, onColor: (Int) -> Unit) {
     Canvas(modifier.pointerInput(Unit) {

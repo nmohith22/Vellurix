@@ -103,6 +103,12 @@ class ReaderActivity : FragmentActivity() {
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
         containerId = READER_CONTAINER_ID
         val root = FrameLayout(this).apply { setBackgroundColor(AndroidColor.rgb(250, 249, 246)) }
+        root.setOnApplyWindowInsetsListener { target, insets ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                insets.displayCutout?.let { cutout -> target.setPadding(cutout.safeInsetLeft, cutout.safeInsetTop, cutout.safeInsetRight, cutout.safeInsetBottom) }
+            }
+            insets
+        }
         root.addView(FrameLayout(this).apply { id = containerId }, FrameLayout.LayoutParams(-1, -1))
         val overlay = PassThroughComposeContainer(this) { event ->
             drawerOpen || settingsOpen || (controlsVisible && (event.y <= 140 * resources.displayMetrics.density || event.y >= root.height - 180 * resources.displayMetrics.density)) || event.x <= 30 * resources.displayMetrics.density
@@ -160,12 +166,18 @@ class ReaderActivity : FragmentActivity() {
                     onResetBook = {
                         val prefs = getSharedPreferences("reader_book_appearance", MODE_PRIVATE)
                         val prefix = "${uri}|"
-                        prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns").forEach { e.remove(prefix + it) } }.apply()
+                        prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").forEach { e.remove(prefix + it) } }.apply()
                         appearance = loadReaderAppearance(this@ReaderActivity, uri.toString())
                         twoColumns = getScopedBoolean("two_columns", false)
                     },
                     onTransition = { mode -> transition = mode; getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putString("page_transition", mode).apply() },
-                    onColumns = { enabled -> twoColumns = enabled; saveScopedBoolean("two_columns", enabled); (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance() },
+                    onReadingMode = { mode ->
+                        val current = appearance ?: loadReaderAppearance(this@ReaderActivity, uri.toString())
+                        saveScopedBoolean("two_columns", mode == "double")
+                        saveScopedBoolean("continuous", mode == "continuous")
+                        saveAppearance(current.copy(twoColumns = mode == "double", continuous = mode == "continuous"))
+                        twoColumns = mode == "double"
+                    },
                     ) }
                 }
             }
@@ -176,8 +188,11 @@ class ReaderActivity : FragmentActivity() {
         overlay.addView(composeOverlay, FrameLayout.LayoutParams(-1, -1))
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
+        root.requestApplyInsets()
         enterImmersiveReader()
-        customizeThisBook = getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean("customize_this_book", false)
+        val bookSettingsShortcut = intent.getBooleanExtra(EXTRA_BOOK_SETTINGS, false)
+        customizeThisBook = bookSettingsShortcut || getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean("customize_this_book", false)
+        settingsOpen = bookSettingsShortcut
         appearance = loadReaderAppearance(this, uri.toString())
         twoColumns = getScopedBoolean("two_columns", false)
         transition = getSharedPreferences("reader_settings", MODE_PRIVATE).getString("page_transition", "page turn") ?: "page turn"
@@ -197,16 +212,33 @@ class ReaderActivity : FragmentActivity() {
 
     private fun loadGlobalReaderAppearanceForActivity(): ReaderAppearance {
         val prefs = getSharedPreferences("reader_settings", MODE_PRIVATE)
-        return ReaderAppearance(prefs.getString("theme", "paper") ?: "paper", prefs.getInt("background", AndroidColor.rgb(250,249,246)), prefs.getInt("foreground", AndroidColor.rgb(43,42,39)), prefs.getString("font_family", "") ?: "", prefs.getFloat("font_scale", 1f), prefs.getBoolean("two_columns", false))
+        return ReaderAppearance(
+            theme = prefs.getString("theme", "paper") ?: "paper",
+            background = prefs.getInt("background", AndroidColor.rgb(250,249,246)),
+            foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
+            fontFamily = prefs.getString("font_family", "") ?: "",
+            fontScale = prefs.getFloat("font_scale", 1f),
+            twoColumns = prefs.getBoolean("two_columns", false),
+            continuous = prefs.getBoolean("continuous", false),
+            topMarginDp = prefs.getFloat("top_margin_dp", 24f),
+            bottomMarginDp = prefs.getFloat("bottom_margin_dp", 24f),
+        )
     }
 
     private fun saveAppearance(value: ReaderAppearance) {
+        val previous = appearance
         appearance = value
         val prefs = scopedAppearancePreferences()
         val prefix = scopedAppearanceKey("")
-        prefs.edit().putString(prefix + "theme", value.theme).putInt(prefix + "background", value.background)
-            .putInt(prefix + "foreground", value.foreground).putString(prefix + "font_family", value.fontFamily)
-            .putFloat(prefix + "font_scale", value.fontScale).apply()
+        prefs.edit().also { editor ->
+            if (previous?.theme != value.theme) editor.putString(prefix + "theme", value.theme)
+            if (previous?.background != value.background) editor.putInt(prefix + "background", value.background)
+            if (previous?.foreground != value.foreground) editor.putInt(prefix + "foreground", value.foreground)
+            if (previous?.fontFamily != value.fontFamily) editor.putString(prefix + "font_family", value.fontFamily)
+            if (previous?.fontScale != value.fontScale) editor.putFloat(prefix + "font_scale", value.fontScale)
+            if (previous?.topMarginDp != value.topMarginDp) editor.putFloat(prefix + "top_margin_dp", value.topMarginDp)
+            if (previous?.bottomMarginDp != value.bottomMarginDp) editor.putFloat(prefix + "bottom_margin_dp", value.bottomMarginDp)
+        }.apply()
         (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance()
     }
 
@@ -290,6 +322,7 @@ class ReaderActivity : FragmentActivity() {
         const val EXTRA_URI = "book_uri"
         const val EXTRA_TITLE = "book_title"
         const val EXTRA_FORMAT = "book_format"
+        const val EXTRA_BOOK_SETTINGS = "book_settings_shortcut"
     }
 }
 
@@ -305,10 +338,16 @@ class ReaderHostFragment : Fragment() {
     private var flowingScroll: ScrollView? = null
     private var publication: org.readium.r2.shared.publication.Publication? = null
     private var locatorSaveJob: Job? = null
-    private var configuredColumns: Boolean? = null
+    private var configuredMode: String? = null
+    private var submittedPreferences: EpubPreferences? = null
 
     fun applyAppearance() {
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        (view as? FrameLayout)?.let { host ->
+            val density = resources.displayMetrics.density
+            host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
+            host.clipToPadding = false
+        }
         when (arguments?.getString(ARG_FORMAT).orEmpty()) {
             "TXT", "HTML", "HTM", "FB2", "RTF" -> {
                 flowingScroll?.setBackgroundColor(appearance.background)
@@ -319,10 +358,16 @@ class ReaderHostFragment : Fragment() {
                 }
             }
             "EPUB" -> {
-                val desiredColumns = appearance.twoColumns
-                if (publication != null && configuredColumns != null && configuredColumns != desiredColumns) installPublication(publication!!, currentLocator())
-                else (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(appearance))
-                configuredColumns = desiredColumns
+                val desiredMode = readerMode(appearance)
+                if (publication != null && configuredMode != null && configuredMode != desiredMode) installPublication(publication!!, currentLocator())
+                else {
+                    val preferences = readingPreferences(appearance)
+                    if (preferences != submittedPreferences) {
+                        (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(preferences)
+                        submittedPreferences = preferences
+                    }
+                }
+                configuredMode = desiredMode
             }
             "PDF" -> childFragmentManager.findFragmentByTag("publication_reader")?.view?.let { page ->
                 page.pivotX = page.width / 2f
@@ -399,7 +444,15 @@ class ReaderHostFragment : Fragment() {
     }
 
     override fun onCreateView(inflater: android.view.LayoutInflater, parent: android.view.ViewGroup?, savedInstanceState: Bundle?): View =
-        FrameLayout(requireContext()).also { containerId = READER_CONTENT_ID; it.id = containerId; it.setBackgroundColor(AndroidColor.rgb(246, 243, 238)) }
+        FrameLayout(requireContext()).also {
+            containerId = READER_CONTENT_ID
+            it.id = containerId
+            it.setBackgroundColor(AndroidColor.rgb(246, 243, 238))
+            val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+            val density = resources.displayMetrics.density
+            it.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
+            it.clipToPadding = false
+        }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val uri = arguments?.getString(ARG_URI)?.let(Uri::parse) ?: return showError("The selected book could not be opened.")
@@ -446,7 +499,7 @@ class ReaderHostFragment : Fragment() {
                 this@ReaderHostFragment.publication = publication
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
-                if (format == "EPUB") configuredColumns = loadReaderAppearance(context, uri.toString()).twoColumns
+                if (format == "EPUB") configuredMode = readerMode(loadReaderAppearance(context, uri.toString()))
                 clearLoading()
                 installPublication(publication, initialLocator)
             }.onFailure { error ->
@@ -459,8 +512,14 @@ class ReaderHostFragment : Fragment() {
     private fun installPublication(value: org.readium.r2.shared.publication.Publication, locator: org.readium.r2.shared.publication.Locator?) {
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        (view as? FrameLayout)?.let { host ->
+            val density = resources.displayMetrics.density
+            host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
+            host.clipToPadding = false
+        }
         childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
         else EpubNavigatorFactory(value).createFragmentFactory(initialLocator = locator, initialPreferences = readingPreferences(appearance))
+        submittedPreferences = if (format == "EPUB") readingPreferences(appearance) else null
         childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
         val fragment = childFragmentManager.findFragmentByTag("publication_reader")
         (fragment as? VisualNavigator)?.let { (activity as? ReaderActivity)?.onNavigatorReady(this, it, tocLinks, tocDepths) }
@@ -591,7 +650,7 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
     val global = loadGlobalReaderAppearance(context)
     val bookPrefs = context.getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
     val prefix = "$uri|"
-    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns").any { bookPrefs.contains(prefix + it) }) {
+    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").any { bookPrefs.contains(prefix + it) }) {
         ReaderAppearanceOverrides(
             theme = if (bookPrefs.contains(prefix + "theme")) bookPrefs.getString(prefix + "theme", null) else null,
             background = if (bookPrefs.contains(prefix + "background")) bookPrefs.getInt(prefix + "background", global.background) else null,
@@ -599,6 +658,9 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
             fontFamily = if (bookPrefs.contains(prefix + "font_family")) bookPrefs.getString(prefix + "font_family", "") else null,
             fontScale = if (bookPrefs.contains(prefix + "font_scale")) bookPrefs.getFloat(prefix + "font_scale", global.fontScale) else null,
             twoColumns = if (bookPrefs.contains(prefix + "two_columns")) bookPrefs.getBoolean(prefix + "two_columns", global.twoColumns) else null,
+            continuous = if (bookPrefs.contains(prefix + "continuous")) bookPrefs.getBoolean(prefix + "continuous", global.continuous) else null,
+            topMarginDp = if (bookPrefs.contains(prefix + "top_margin_dp")) bookPrefs.getFloat(prefix + "top_margin_dp", global.topMarginDp) else null,
+            bottomMarginDp = if (bookPrefs.contains(prefix + "bottom_margin_dp")) bookPrefs.getFloat(prefix + "bottom_margin_dp", global.bottomMarginDp) else null,
         )
     } else null
     return resolveReaderAppearance(global, overrides)
@@ -613,6 +675,9 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
         fontFamily = prefs.getString("font_family", "") ?: "",
         fontScale = prefs.getFloat("font_scale", 1f),
         twoColumns = prefs.getBoolean("two_columns", false),
+        continuous = prefs.getBoolean("continuous", false),
+        topMarginDp = prefs.getFloat("top_margin_dp", 24f),
+        bottomMarginDp = prefs.getFloat("bottom_margin_dp", 24f),
     )
 }
 
@@ -629,9 +694,15 @@ private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
         "OpenDyslexic" -> FontFamily.OPEN_DYSLEXIC; "AccessibleDfA" -> FontFamily.ACCESSIBLE_DFA; "iA Writer Duospace" -> FontFamily.IA_WRITER_DUOSPACE; else -> null
     },
     fontSize = appearance.fontScale.toDouble(),
-    scroll = !appearance.twoColumns,
+    scroll = appearance.continuous,
     publisherStyles = appearance.fontFamily.isEmpty()
 )
+
+private fun readerMode(appearance: ReaderAppearance): String = when {
+    appearance.continuous -> "continuous"
+    appearance.twoColumns -> "double"
+    else -> "single"
+}
 
 internal class HueWheel(context: android.content.Context, private val changed: (Int) -> Unit) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)

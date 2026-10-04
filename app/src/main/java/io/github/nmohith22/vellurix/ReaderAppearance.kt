@@ -7,6 +7,9 @@ internal data class ReaderAppearance(
     val fontFamily: String = "",
     val fontScale: Float = 1f,
     val twoColumns: Boolean = false,
+    val continuous: Boolean = false,
+    val topMarginDp: Float = 24f,
+    val bottomMarginDp: Float = 24f,
 )
 
 internal data class ReaderAppearanceOverrides(
@@ -16,6 +19,9 @@ internal data class ReaderAppearanceOverrides(
     val fontFamily: String? = null,
     val fontScale: Float? = null,
     val twoColumns: Boolean? = null,
+    val continuous: Boolean? = null,
+    val topMarginDp: Float? = null,
+    val bottomMarginDp: Float? = null,
 )
 
 internal fun resolveReaderAppearance(
@@ -28,4 +34,7 @@ internal fun resolveReaderAppearance(
     fontFamily = book?.fontFamily ?: global.fontFamily,
     fontScale = book?.fontScale ?: global.fontScale,
     twoColumns = book?.twoColumns ?: global.twoColumns,
+    continuous = book?.continuous ?: global.continuous,
+    topMarginDp = book?.topMarginDp ?: global.topMarginDp,
+    bottomMarginDp = book?.bottomMarginDp ?: global.bottomMarginDp,
 )

@@ -11,6 +11,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -23,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -32,6 +39,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -117,6 +126,8 @@ private fun FolioApp(resumeTick: Int) {
     var hiddenDialog by remember { mutableStateOf(false) }
     var shelfName by remember { mutableStateOf("") }
     var selectedBook by remember { mutableStateOf<BookItem?>(null) }
+    val selectedBooks = remember { mutableStateListOf<String>() }
+    var bulkShelfDialog by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     val settings = remember { context.getSharedPreferences("library_settings", android.content.Context.MODE_PRIVATE) }
     val readerSettings = remember { context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE) }
@@ -127,12 +138,18 @@ private fun FolioApp(resumeTick: Int) {
     var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
     var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
     var readerFontScale by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("font_scale", 1f)) }
+    var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 24f)) }
+    var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 24f)) }
+    var readerTwoColumns by rememberSaveable { mutableStateOf(readerSettings.getBoolean("two_columns", false)) }
+    var readerContinuous by rememberSaveable { mutableStateOf(readerSettings.getBoolean("continuous", false)) }
     var fontDialog by remember { mutableStateOf(false) }
     var colorDialog by remember { mutableStateOf(false) }
     var editingBackground by remember { mutableStateOf(true) }
     var customBackground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))) }
     var customForeground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))) }
     var search by remember { mutableStateOf("") }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     LaunchedEffect(resumeTick) {
         if (resumeTick > 0) {
@@ -143,6 +160,10 @@ private fun FolioApp(resumeTick: Int) {
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
             readerFont = readerSettings.getString("font_family", "") ?: ""
             readerFontScale = readerSettings.getFloat("font_scale", 1f)
+            readerTopMargin = readerSettings.getFloat("top_margin_dp", 24f)
+            readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 24f)
+            readerTwoColumns = readerSettings.getBoolean("two_columns", false)
+            readerContinuous = readerSettings.getBoolean("continuous", false)
             customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
             customForeground = readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))
         }
@@ -197,9 +218,10 @@ private fun FolioApp(resumeTick: Int) {
         }
     }
 
-    fun populate() {
+    fun populate(manual: Boolean = true) {
         val rootUri = folderUri
-        if (rootUri == null) { pickFolder.launch(null); return }
+        if (rootUri == null) { if (manual) pickFolder.launch(null); return }
+        if (scanning) return
         scanning = true
         scope.launch {
             try {
@@ -214,15 +236,22 @@ private fun FolioApp(resumeTick: Int) {
                     count++
                 }
                 saveBooks()
-                Toast.makeText(context, "Added $count supported files.", Toast.LENGTH_SHORT).show()
+                if (manual || count > 0) Toast.makeText(context, "Added $count supported files.", Toast.LENGTH_SHORT).show()
             } catch (_: SecurityException) {
-                Toast.makeText(context, "Folder access expired. Choose the folder again, then populate.", Toast.LENGTH_LONG).show()
+                if (manual) Toast.makeText(context, "Folder access expired. Choose the folder again, then populate.", Toast.LENGTH_LONG).show()
             } catch (_: Exception) {
-                Toast.makeText(context, "Could not scan the selected folder. Your library was not changed.", Toast.LENGTH_LONG).show()
+                if (manual) Toast.makeText(context, "Could not scan the selected folder. Your library was not changed.", Toast.LENGTH_LONG).show()
             } finally {
                 scanning = false
             }
         }
+    }
+
+    LaunchedEffect(resumeTick) { if (resumeTick > 0) populate(manual = false) }
+    LaunchedEffect(searchOpen) { if (searchOpen) searchFocus.requestFocus() }
+
+    fun toggleSelection(book: BookItem) {
+        if (book.uri in selectedBooks) selectedBooks.remove(book.uri) else selectedBooks.add(book.uri)
     }
 
     val visibleBooks by remember {
@@ -247,27 +276,35 @@ private fun FolioApp(resumeTick: Int) {
     val appColorScheme = if (palette.dark) darkColorScheme(primary = appAccent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
         else lightColorScheme(primary = appAccent, background = appColors.first, surface = appColors.second, onSurface = appColors.third, onBackground = appColors.third)
     MaterialTheme(colorScheme = appColorScheme) {
-        Column(Modifier.fillMaxSize().background(appColors.first).windowInsetsPadding(WindowInsets.systemBars)) {
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 10.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.fillMaxSize().background(appColors.first).windowInsetsPadding(WindowInsets.safeDrawing)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("VELLURIX", style = MaterialTheme.typography.labelLarge, color = appAccent, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
                     Text("Your library", style = MaterialTheme.typography.headlineMedium, color = appColors.third, fontWeight = FontWeight.SemiBold)
                 }
                 Row {
-                    IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Rounded.Settings, "Settings", tint = appColors.third) }
-                    IconButton(onClick = { shelfDialog = true }) { Icon(Icons.Rounded.Add, "Create a shelf", tint = appColors.third) }
-                    IconButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.FolderOpen, "Import a book", tint = appColors.third) }
+                    IconButton(modifier = Modifier.size(40.dp), onClick = { settingsOpen = true }) { Icon(Icons.Rounded.Settings, "Settings", tint = appColors.third) }
+                    IconButton(modifier = Modifier.size(40.dp), onClick = { shelfDialog = true }) { Icon(Icons.Rounded.Add, "Create a shelf", tint = appColors.third) }
+                    IconButton(modifier = Modifier.size(40.dp), onClick = { importFile.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.FolderOpen, "Import a book", tint = appColors.third) }
+                    IconButton(modifier = Modifier.size(40.dp), onClick = { searchOpen = !searchOpen; if (!searchOpen) search = "" }) { Icon(Icons.Rounded.Search, "Search your library", tint = appColors.third) }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.weight(1f), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, shape = RoundedCornerShape(18.dp))
-                FilledTonalButton(onClick = ::populate, enabled = !scanning, contentPadding = PaddingValues(14.dp)) {
-                    if (scanning) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Rounded.CreateNewFolder, "Populate from folder")
+            AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(), exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()) {
+                OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).focusRequester(searchFocus), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, trailingIcon = { IconButton(onClick = { search = ""; searchOpen = false }) { Icon(Icons.Rounded.Close, "Close search") } }, shape = RoundedCornerShape(18.dp))
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 18.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(if (folderUri == null) "Choose a folder before populating" else "New folder books are added when you open the library", style = MaterialTheme.typography.bodySmall, color = Muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (store.exclusions().isNotEmpty()) TextButton(onClick = { hiddenDialog = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Hidden ${store.exclusions().size}", style = MaterialTheme.typography.labelSmall) }
+                    TextButton(onClick = { populate() }, enabled = !scanning, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        if (scanning) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("Populate")
+                    }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 18.dp, top = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (folderUri == null) "Choose a folder, then tap Populate to scan it" else "Folder scans only run when you ask", style = MaterialTheme.typography.bodySmall, color = Muted)
-                if (store.exclusions().isNotEmpty()) TextButton(onClick = { hiddenDialog = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Hidden ${store.exclusions().size}", style = MaterialTheme.typography.labelSmall) }
+            if (selectedBooks.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selectedBooks.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = appColors.third)
+                TextButton(onClick = { bulkShelfDialog = true }) { Text("Move to shelf") }
+                TextButton(onClick = { selectedBooks.clear() }) { Text("Cancel") }
             }
             LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(shelves.size) { index ->
@@ -291,13 +328,13 @@ private fun FolioApp(resumeTick: Int) {
             } else {
                 if (layoutMode == "cards") {
                     LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, onClick = { openBook(book) }, onLongClick = { selectedBook = book }) }
+                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, selected = book.uri in selectedBooks, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book }) }
                     }
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
                             val book = visibleBooks[index]
-                            BookRow(book, cardSize, appColors.third, onClick = { openBook(book) }, onLongClick = { selectedBook = book })
+                            BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
                         }
                     }
                 }
@@ -376,6 +413,21 @@ private fun FolioApp(resumeTick: Int) {
                     Slider(value = readerFontScale, onValueChange = { readerFontScale = it }, valueRange = .8f..1.8f, onValueChangeFinished = {
                         context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("font_scale", readerFontScale).apply()
                     })
+                    Text("Default EPUB layout", style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) ->
+                            val selected = when (mode) { "double" -> readerTwoColumns && !readerContinuous; "continuous" -> readerContinuous; else -> !readerTwoColumns && !readerContinuous }
+                            FilterChip(selected = selected, onClick = {
+                                readerTwoColumns = mode == "double"; readerContinuous = mode == "continuous"
+                                readerSettings.edit().putBoolean("two_columns", readerTwoColumns).putBoolean("continuous", readerContinuous).apply()
+                            }, label = { Text(label) })
+                        }
+                    }
+                    Text("Paginated by default. Continuous mode scrolls through long sections.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    Text("Top reading margin · ${readerTopMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                    Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
+                    Text("Bottom reading margin · ${readerBottomMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                    Slider(value = readerBottomMargin, onValueChange = { readerBottomMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("bottom_margin_dp", readerBottomMargin).apply() })
                     Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             },
@@ -427,14 +479,46 @@ private fun FolioApp(resumeTick: Int) {
         }
     }
 
+    if (bulkShelfDialog) AlertDialog(
+        onDismissRequest = { bulkShelfDialog = false },
+        title = { Text("Move ${selectedBooks.size} books") },
+        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) { shelves.forEach { shelf -> TextButton(onClick = {
+            val selected = selectedBooks.toSet()
+            books.indices.forEach { index -> if (books[index].uri in selected) books[index] = books[index].copy(shelf = shelf) }
+            saveBooks(); selectedBooks.clear(); bulkShelfDialog = false
+        }) { Text(shelf) } } } },
+        confirmButton = { TextButton(onClick = { bulkShelfDialog = false }) { Text("Cancel") } },
+    )
+
     selectedBook?.let { book ->
+        var renamedTitle by remember(book.uri) { mutableStateOf(book.title) }
         AlertDialog(
             onDismissRequest = { selectedBook = null },
             icon = { Icon(Icons.Rounded.AutoStories, null, tint = appAccent) },
-            title = { Text(book.title) },
+            title = { Text("Book options") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${book.format} · Add to shelf")
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = renamedTitle, onValueChange = { renamedTitle = it }, singleLine = true, label = { Text("Title in Vellurix") })
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = {
+                            val title = renamedTitle.trim()
+                            val index = books.indexOfFirst { it.uri == book.uri }
+                            if (title.isNotEmpty() && index >= 0) { books[index] = book.copy(title = title); saveBooks() }
+                            selectedBook = null
+                        }) { Text("Rename") }
+                        TextButton(onClick = { if (book.uri !in selectedBooks) selectedBooks.add(book.uri); selectedBook = null }) { Text("Select multiple") }
+                    }
+                    TextButton(onClick = {
+                        context.startActivity(Intent(context, ReaderActivity::class.java).apply {
+                            putExtra(ReaderActivity.EXTRA_URI, book.uri)
+                            putExtra(ReaderActivity.EXTRA_TITLE, book.title)
+                            putExtra(ReaderActivity.EXTRA_FORMAT, book.format)
+                            putExtra(ReaderActivity.EXTRA_BOOK_SETTINGS, true)
+                        })
+                        selectedBook = null
+                    }) { Text("Reader settings with live preview") }
+                    HorizontalDivider()
+                    Text("Move to shelf")
                     shelves.forEach { shelf ->
                         TextButton(onClick = {
                             val index = books.indexOfFirst { it.uri == book.uri }
@@ -445,7 +529,7 @@ private fun FolioApp(resumeTick: Int) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { books.remove(book); store.saveExclusions(store.exclusions() + listOfNotNull(book.uri, book.sourceUri).toSet()); removeManagedCopy(context, book.uri); saveBooks(); selectedBook = null }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Remove") } },
+            confirmButton = { TextButton(onClick = { books.remove(book); store.saveExclusions(store.exclusions() + listOfNotNull(book.uri, book.sourceUri).toSet()); removeManagedCopy(context, book.uri); saveBooks(); selectedBooks.remove(book.uri); selectedBook = null }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Remove") } },
             dismissButton = { TextButton(onClick = { selectedBook = null }) { Text("Done") } },
         )
     }
@@ -536,7 +620,7 @@ private fun migrateBookState(context: android.content.Context, fromUri: String, 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(colors.first) }
     val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
@@ -544,6 +628,7 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: B
         Column(Modifier.padding((10 * size).dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second)))) {
                 BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) })
+                if (selected) Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) { Icon(Icons.Rounded.Check, "Selected", Modifier.padding(5.dp).size(18.dp), tint = Color.White) }
             }
             if (showTitle) Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (showTitle) Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -553,7 +638,7 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: B
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val fallback = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(fallback.first) }
     val rowColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
@@ -564,6 +649,7 @@ private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -
                 Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
+            if (selected) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
         }
     }
 }
