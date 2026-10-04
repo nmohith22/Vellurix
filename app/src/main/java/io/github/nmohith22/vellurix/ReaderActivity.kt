@@ -214,7 +214,7 @@ class ReaderActivity : FragmentActivity() {
                     onResetBook = {
                         val prefs = getSharedPreferences("reader_book_appearance", MODE_PRIVATE)
                         val prefix = "${uri}|"
-                        prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").forEach { e.remove(prefix + it) } }.apply()
+                        prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "line_spacing", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").forEach { e.remove(prefix + it) } }.apply()
                         appearance = loadReaderAppearance(this@ReaderActivity, uri.toString())
                         twoColumns = getScopedBoolean("two_columns", false)
                     },
@@ -283,6 +283,7 @@ class ReaderActivity : FragmentActivity() {
             foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
             fontFamily = prefs.getString("font_family", "") ?: "",
             fontScale = prefs.getFloat("font_scale", 1f),
+            lineSpacing = prefs.getFloat("line_spacing", 1f).coerceIn(1f, 2f),
             twoColumns = prefs.getBoolean("two_columns", false),
             continuous = prefs.getBoolean("continuous", false),
         topMarginDp = prefs.getFloat("top_margin_dp", 0f),
@@ -301,6 +302,7 @@ class ReaderActivity : FragmentActivity() {
             if (previous?.foreground != value.foreground) editor.putInt(prefix + "foreground", value.foreground)
             if (previous?.fontFamily != value.fontFamily) editor.putString(prefix + "font_family", value.fontFamily)
             if (previous?.fontScale != value.fontScale) editor.putFloat(prefix + "font_scale", value.fontScale)
+            if (previous?.lineSpacing != value.lineSpacing) editor.putFloat(prefix + "line_spacing", value.lineSpacing)
             if (previous?.topMarginDp != value.topMarginDp) editor.putFloat(prefix + "top_margin_dp", value.topMarginDp)
             if (previous?.bottomMarginDp != value.bottomMarginDp) editor.putFloat(prefix + "bottom_margin_dp", value.bottomMarginDp)
         }.apply()
@@ -448,6 +450,7 @@ class ReaderHostFragment : Fragment() {
                     setTextColor(appearance.foreground)
                     textSize = 18f * appearance.fontScale
                     typeface = appearance.fontFamily.takeIf { it.isNotBlank() }?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.DEFAULT
+                    setLineSpacing(8f, appearance.lineSpacing)
                 }
             }
             "EPUB" -> {
@@ -764,7 +767,7 @@ class ReaderHostFragment : Fragment() {
             textSize = 18f * appearance.fontScale
             setTextColor(palette.second)
             typeface = appearance.fontFamily.takeIf { it.isNotBlank() }?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.DEFAULT
-            setLineSpacing(8f, 1f)
+            setLineSpacing(8f, appearance.lineSpacing)
             setPadding(26, 24, 26, 36)
         }
         flowingText = content
@@ -855,13 +858,14 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
     val global = loadGlobalReaderAppearance(context)
     val bookPrefs = context.getSharedPreferences("reader_book_appearance", android.content.Context.MODE_PRIVATE)
     val prefix = "$uri|"
-    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").any { bookPrefs.contains(prefix + it) }) {
+    val overrides = if (listOf("theme", "background", "foreground", "font_family", "font_scale", "line_spacing", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp").any { bookPrefs.contains(prefix + it) }) {
         ReaderAppearanceOverrides(
             theme = if (bookPrefs.contains(prefix + "theme")) bookPrefs.getString(prefix + "theme", null) else null,
             background = if (bookPrefs.contains(prefix + "background")) bookPrefs.getInt(prefix + "background", global.background) else null,
             foreground = if (bookPrefs.contains(prefix + "foreground")) bookPrefs.getInt(prefix + "foreground", global.foreground) else null,
             fontFamily = if (bookPrefs.contains(prefix + "font_family")) bookPrefs.getString(prefix + "font_family", "") else null,
             fontScale = if (bookPrefs.contains(prefix + "font_scale")) bookPrefs.getFloat(prefix + "font_scale", global.fontScale) else null,
+            lineSpacing = if (bookPrefs.contains(prefix + "line_spacing")) bookPrefs.getFloat(prefix + "line_spacing", global.lineSpacing) else null,
             twoColumns = if (bookPrefs.contains(prefix + "two_columns")) bookPrefs.getBoolean(prefix + "two_columns", global.twoColumns) else null,
             continuous = if (bookPrefs.contains(prefix + "continuous")) bookPrefs.getBoolean(prefix + "continuous", global.continuous) else null,
         topMarginDp = if (bookPrefs.contains(prefix + "top_margin_dp")) bookPrefs.getFloat(prefix + "top_margin_dp", global.topMarginDp) else null,
@@ -879,6 +883,7 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
         foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
         fontFamily = prefs.getString("font_family", "") ?: "",
         fontScale = prefs.getFloat("font_scale", 1f),
+        lineSpacing = prefs.getFloat("line_spacing", 1f).coerceIn(1f, 2f),
         twoColumns = prefs.getBoolean("two_columns", false),
         continuous = prefs.getBoolean("continuous", false),
         topMarginDp = prefs.getFloat("top_margin_dp", 0f),
@@ -900,15 +905,16 @@ private fun readingPreferences(appearance: ReaderAppearance, widthPx: Int, heigh
         "OpenDyslexic" -> FontFamily.OPEN_DYSLEXIC; "AccessibleDfA" -> FontFamily.ACCESSIBLE_DFA; "iA Writer Duospace" -> FontFamily.IA_WRITER_DUOSPACE; else -> null
     },
     fontSize = appearance.fontScale.toDouble(),
+    lineHeight = appearance.lineSpacing.takeIf { it > 1f }?.toDouble(),
     scroll = appearance.continuous,
-    publisherStyles = appearance.fontFamily.isEmpty()
+    publisherStyles = appearance.fontFamily.isEmpty() && appearance.lineSpacing <= 1f
 )
 
 private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, heightPx: Int) =
     EpubNavigatorFragment.Configuration().apply {
         readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) {
             org.readium.r2.navigator.epub.css.RsProperties(
-                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(45.0),
+                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(48.5),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
             )
         } else {

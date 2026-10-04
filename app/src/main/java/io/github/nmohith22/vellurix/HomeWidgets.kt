@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -15,8 +16,8 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Bundle
 import android.util.LruCache
-import android.view.Gravity
 import android.widget.RemoteViews
+import android.widget.RemoteViewsService
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
@@ -163,7 +164,7 @@ class BookWidgetProvider : AppWidgetProvider() {
             val format = prefs.getString("book_format_$id", "EPUB") ?: "EPUB"
             val views = RemoteViews(context.packageName, R.layout.widget_book)
             val book = uri?.let { WidgetBook(it, title, format, "") }
-            views.setImageViewBitmap(R.id.book_cover, book?.let { widgetCover(context, it) } ?: CoverArtwork.create(title, format, 240, 350))
+            views.setImageViewBitmap(R.id.book_cover, book?.let { widgetCover(context, it, 480, 700) } ?: CoverArtwork.create(title, format, 480, 700))
             views.setContentDescription(R.id.book_cover, title)
             if (uri != null) views.setOnClickPendingIntent(R.id.book_widget_root, openBook(context, id, uri, title, format))
             else views.setOnClickPendingIntent(R.id.book_widget_root, PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
@@ -178,37 +179,76 @@ class ShelfWidgetProvider : AppWidgetProvider() {
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) = render(context, manager, id)
 
     companion object {
-        fun render(context: Context, manager: AppWidgetManager, id: Int, loadMissingCovers: Boolean = true) {
+        fun render(context: Context, manager: AppWidgetManager, id: Int) {
             val shelf = context.getSharedPreferences("folio_widgets", Context.MODE_PRIVATE).getString("shelf_$id", "All books") ?: "All books"
             val allBooks = WidgetLibrary.books(context)
             val books = if (shelf == "All books") allBooks else allBooks.filter { it.shelf == shelf }
-            val options = manager.getAppWidgetOptions(id)
-            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 220).coerceAtLeast(110)
-            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220).coerceAtLeast(110)
-            val columns = (width / 100).coerceIn(2, 4)
-            val rows = (height / 106).coerceIn(2, 5)
-            val visible = books.take(columns * rows)
             val views = RemoteViews(context.packageName, R.layout.widget_shelf)
             views.setTextViewText(R.id.shelf_title, shelf)
             views.setTextViewText(R.id.shelf_count, "${books.size} books")
-            views.setInt(R.id.shelf_grid, "setGravity", Gravity.CENTER)
-            views.removeAllViews(R.id.shelf_grid)
-            visible.chunked(columns).forEach { rowBooks ->
-                val row = RemoteViews(context.packageName, R.layout.widget_shelf_row)
-                rowBooks.forEach { book ->
-                    val cell = RemoteViews(context.packageName, R.layout.widget_shelf_book)
-                    cell.setImageViewBitmap(R.id.shelf_book_cover, widgetCover(context, book, 96, 138) ?: CoverArtwork.create(book.title, book.format, 96, 138))
-                    cell.setTextViewText(R.id.shelf_book_title, book.title)
-                    cell.setOnClickPendingIntent(R.id.shelf_book_cell, openBook(context, id * 100 + book.uri.hashCode(), book.uri, book.title, book.format))
-                    row.addView(R.id.shelf_widget_row, cell)
-                }
-                views.addView(R.id.shelf_grid, row)
-            }
+            val adapterIntent = Intent(context, ShelfWidgetService::class.java)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                .setData(Uri.parse("vellurix://shelf-widget/$id"))
+            views.setRemoteAdapter(R.id.shelf_stack, adapterIntent)
+            views.setEmptyView(R.id.shelf_stack, R.id.shelf_empty)
+            val template = Intent(context, ReaderActivity::class.java).setData(Uri.parse("vellurix://shelf-open/$id"))
+            val pending = PendingIntent.getActivity(context, id, template, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
+            views.setPendingIntentTemplate(R.id.shelf_stack, pending)
             views.setOnClickPendingIntent(R.id.shelf_title, PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             manager.updateAppWidget(id, views)
-            if (loadMissingCovers) loadWidgetCovers(context, visible) { render(context, AppWidgetManager.getInstance(context), id, false) }
+            manager.notifyAppWidgetViewDataChanged(id, R.id.shelf_stack)
         }
     }
+}
+
+class ShelfWidgetService : RemoteViewsService() {
+    override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
+        ShelfWidgetViewsFactory(applicationContext, intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID))
+}
+
+private class ShelfWidgetViewsFactory(private val context: Context, private val widgetId: Int) : RemoteViewsService.RemoteViewsFactory {
+    private var books = emptyList<WidgetBook>()
+
+    override fun onCreate() = Unit
+    override fun onDataSetChanged() {
+        val shelf = context.getSharedPreferences("folio_widgets", Context.MODE_PRIVATE).getString("shelf_$widgetId", "All books") ?: "All books"
+        val allBooks = WidgetLibrary.books(context)
+        books = if (shelf == "All books") allBooks else allBooks.filter { it.shelf == shelf }
+    }
+    override fun onDestroy() { books = emptyList() }
+    override fun getCount() = books.size
+    override fun getViewAt(position: Int): RemoteViews? {
+        val book = books.getOrNull(position) ?: return null
+        val views = RemoteViews(context.packageName, R.layout.widget_shelf_book)
+        val cover = widgetCover(context, book, 360, 520) ?: CoverArtwork.create(book.title, book.format, 360, 520)
+        views.setImageViewBitmap(R.id.shelf_book_cover, cover)
+        views.setContentDescription(R.id.shelf_book_cover, "Cover of ${book.title}")
+        views.setOnClickFillInIntent(R.id.shelf_book_cell, Intent()
+            .putExtra(ReaderActivity.EXTRA_URI, book.uri)
+            .putExtra(ReaderActivity.EXTRA_TITLE, book.title)
+            .putExtra(ReaderActivity.EXTRA_FORMAT, book.format))
+        if (!cachedCoverFile(context, book.uri).isFile) loadCoverForWidget(context, book, widgetId)
+        return views
+    }
+    override fun getLoadingView(): RemoteViews? = null
+    override fun getViewTypeCount() = 1
+    override fun getItemId(position: Int) = books.getOrNull(position)?.uri?.hashCode()?.toLong() ?: position.toLong()
+    override fun hasStableIds() = true
+}
+
+private val pendingShelfCoverLoads = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+private fun loadCoverForWidget(context: Context, book: WidgetBook, widgetId: Int) {
+    if (!pendingShelfCoverLoads.add(book.uri)) return
+    Thread {
+        try { runCatching { extractCover(context.applicationContext, book.uri, book.format)?.recycle() } }
+        finally {
+            pendingShelfCoverLoads.remove(book.uri)
+            Handler(Looper.getMainLooper()).post {
+                AppWidgetManager.getInstance(context).notifyAppWidgetViewDataChanged(widgetId, R.id.shelf_stack)
+            }
+        }
+    }.start()
 }
 
 private fun widgetCover(context: Context, book: WidgetBook, targetWidth: Int = 192, targetHeight: Int = 280): Bitmap? {
@@ -217,11 +257,11 @@ private fun widgetCover(context: Context, book: WidgetBook, targetWidth: Int = 1
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.path, bounds)
     val sample = maxOf(bounds.outWidth / targetWidth, bounds.outHeight / targetHeight, 1)
-    val source = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+    val source = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.RGB_565; inDither = true }) ?: return null
     val scale = minOf(targetWidth.toFloat() / source.width, targetHeight.toFloat() / source.height, 1f)
     val small = Bitmap.createScaledBitmap(source, (source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), true)
     if (small !== source) source.recycle()
-    return small.copy(Bitmap.Config.RGB_565, false).also { if (it !== small) small.recycle() }
+    return small
 }
 
 private fun loadWidgetCovers(context: Context, books: List<WidgetBook>, onLoaded: () -> Unit) {

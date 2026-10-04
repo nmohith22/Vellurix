@@ -38,7 +38,7 @@ internal interface CoverBookInfo {
 }
 
 internal fun cachedCoverFile(context: Context, uriString: String): File =
-    File(context.cacheDir, "book-covers/${uriString.hashCode().toUInt().toString(16)}.png")
+    File(context.cacheDir, "book-covers-v2/${uriString.hashCode().toUInt().toString(16)}.png")
 
 internal fun extractCover(context: Context, uriString: String, format: String): Bitmap? = runCatching {
     val uri = Uri.parse(uriString)
@@ -49,7 +49,7 @@ internal fun extractCover(context: Context, uriString: String, format: String): 
         "PDF" -> context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
             PdfRenderer(descriptor).use { renderer ->
                 if (renderer.pageCount == 0) null else renderer.openPage(0).use { page ->
-                    val width = 420
+                    val width = 840
                     val height = (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1)
                     Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) }
                 }
@@ -106,7 +106,7 @@ private fun epubCover(context: Context, uri: Uri): Bitmap? {
             zip.getInputStream(imageEntry).use { stream ->
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeStream(stream, null, bounds)
-                val sample = maxOf(bounds.outWidth / 420, bounds.outHeight / 620, 1)
+                val sample = maxOf(bounds.outWidth / 840, bounds.outHeight / 840, 1)
                 zip.getInputStream(imageEntry).use { image ->
                     BitmapFactory.decodeStream(image, null, BitmapFactory.Options().apply { inSampleSize = sample.coerceAtMost(16) })
                 }

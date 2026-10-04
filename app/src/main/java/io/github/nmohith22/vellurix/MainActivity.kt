@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.rgb(246, 243, 238)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        setContent { FolioApp(resumeTick) }
+        setContent { FolioApp(resumeTick) { resumeTick++ } }
     }
 
     override fun onResume() {
@@ -128,7 +128,7 @@ private class LibraryStore(context: android.content.Context) {
 }
 
 @Composable
-private fun FolioApp(resumeTick: Int) {
+private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { LibraryStore(context.applicationContext) }
     val books = remember { mutableStateListOf<BookItem>().apply { addAll(store.books()) } }
@@ -149,12 +149,14 @@ private fun FolioApp(resumeTick: Int) {
     var layoutMode by rememberSaveable { mutableStateOf(settings.getString("layout", "cards") ?: "cards") }
     var cardSize by rememberSaveable { mutableFloatStateOf(settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)) }
     var progressDisplay by rememberSaveable { mutableStateOf(settings.getString("progress_display", "percent") ?: "percent") }
+    var compactListProgress by rememberSaveable { mutableStateOf(settings.getBoolean("compact_list_progress", true)) }
     var recentBookUri by remember { mutableStateOf(context.getSharedPreferences("reading_summary", android.content.Context.MODE_PRIVATE).getString("last_uri", null)) }
     var coverOnlyCards by rememberSaveable { mutableStateOf(settings.getBoolean("cover_only_cards", false)) }
     var appTheme by rememberSaveable { mutableStateOf(settings.getString("app_theme", "paper") ?: "paper") }
     var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
     var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
     var readerFontScale by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("font_scale", 1f)) }
+    var readerLineSpacing by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)) }
     var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 0f)) }
     var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 0f)) }
     var readerTwoColumns by rememberSaveable { mutableStateOf(readerSettings.getBoolean("two_columns", false)) }
@@ -168,17 +170,57 @@ private fun FolioApp(resumeTick: Int) {
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { destination ->
+        if (destination != null) scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val json = ReadingBackup.create(context.applicationContext)
+                    context.contentResolver.openOutputStream(destination, "wt")?.bufferedWriter()?.use { it.write(json) }
+                        ?: error("Could not create the backup file.")
+                }
+                Toast.makeText(context, "Vellurix backup exported.", Toast.LENGTH_LONG).show()
+            } catch (error: Exception) {
+                Toast.makeText(context, error.message ?: "Could not export the backup.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { source ->
+        if (source != null) scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(source)?.use { ReadingBackup.restore(context.applicationContext, it) }
+                        ?: error("Could not open the backup file.")
+                }
+                if (result.matchedBooks == 0 && result.backupBooks > 0) {
+                    Toast.makeText(context, "No matching books found. Add the original EPUB or PDF files, then restore again.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "Backup restored for ${result.matchedBooks} books.", Toast.LENGTH_LONG).show()
+                    books.clear()
+                    books.addAll(store.books())
+                    shelves.clear()
+                    shelves.add("All books")
+                    shelves.addAll(store.shelves().filterNot { it in shelves })
+                    onBackupRestored()
+                }
+            } catch (error: Exception) {
+                Toast.makeText(context, error.message ?: "Could not restore the backup.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val compactScreen = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 380
     LaunchedEffect(resumeTick) {
         if (resumeTick > 0) {
             layoutMode = settings.getString("layout", "cards") ?: "cards"
             cardSize = settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)
             progressDisplay = settings.getString("progress_display", "percent") ?: "percent"
+            compactListProgress = settings.getBoolean("compact_list_progress", true)
             recentBookUri = context.getSharedPreferences("reading_summary", android.content.Context.MODE_PRIVATE).getString("last_uri", null)
             coverOnlyCards = settings.getBoolean("cover_only_cards", false)
             appTheme = settings.getString("app_theme", "paper") ?: "paper"
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
             readerFont = readerSettings.getString("font_family", "") ?: ""
             readerFontScale = readerSettings.getFloat("font_scale", 1f)
+            readerLineSpacing = readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)
             readerTopMargin = readerSettings.getFloat("top_margin_dp", 0f)
             readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 0f)
             readerTwoColumns = readerSettings.getBoolean("two_columns", false)
@@ -330,7 +372,6 @@ private fun FolioApp(resumeTick: Int) {
                         }
                     }
                 }
-                }
             }
             AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top, animationSpec = tween(220)) + expandHorizontally(expandFrom = Alignment.End, animationSpec = tween(220)) + fadeIn(tween(160)), exit = shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(180)) + shrinkHorizontally(shrinkTowards = Alignment.End, animationSpec = tween(180)) + fadeOut(tween(120))) {
                 OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).focusRequester(searchFocus), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, trailingIcon = { IconButton(onClick = { search = ""; searchOpen = false }) { Icon(Icons.Rounded.Close, "Close search") } }, shape = RoundedCornerShape(18.dp))
@@ -409,7 +450,7 @@ private fun FolioApp(resumeTick: Int) {
                         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
                                 val book = visibleBooks[index]
-                                BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, modifier = Modifier.animateItem(fadeInSpec = tween(180), fadeOutSpec = tween(110), placementSpec = spring(stiffness = Spring.StiffnessMediumLow)), onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
+                                BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, compactProgress = compactScreen && compactListProgress, modifier = Modifier.animateItem(fadeInSpec = tween(180), fadeOutSpec = tween(110), placementSpec = spring(stiffness = Spring.StiffnessMediumLow)), onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
                             }
                         }
                     }
@@ -466,6 +507,13 @@ private fun FolioApp(resumeTick: Int) {
                         FilterChip(selected = progressDisplay == "percent", onClick = { progressDisplay = "percent"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Percent") })
                         FilterChip(selected = progressDisplay == "pages", onClick = { progressDisplay = "pages"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Pages") })
                     }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Compact list progress", style = MaterialTheme.typography.titleSmall)
+                            Text("On small screens, show a percentage instead of a progress bar.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                        }
+                        Switch(checked = compactListProgress, onCheckedChange = { compactListProgress = it; settings.edit().putBoolean("compact_list_progress", it).apply() })
+                    }
                     if (layoutMode == "cards") {
                         Text("Card labels", style = MaterialTheme.typography.titleSmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -514,6 +562,11 @@ private fun FolioApp(resumeTick: Int) {
                     Slider(value = readerFontScale, onValueChange = { readerFontScale = it }, valueRange = .8f..1.8f, onValueChangeFinished = {
                         context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("font_scale", readerFontScale).apply()
                     })
+                    Text("Line spacing · ${(readerLineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                    Slider(value = readerLineSpacing, onValueChange = { readerLineSpacing = it }, valueRange = 1f..2f, onValueChangeFinished = {
+                        readerSettings.edit().putFloat("line_spacing", readerLineSpacing).apply()
+                    })
+                    Text("Higher line spacing overrides publisher text styles in EPUBs.", style = MaterialTheme.typography.bodySmall, color = Muted)
                     Text("Default EPUB layout", style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) ->
@@ -529,6 +582,12 @@ private fun FolioApp(resumeTick: Int) {
                     Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
                     Text("Bottom reading margin · ${readerBottomMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
                     Slider(value = readerBottomMargin, onValueChange = { readerBottomMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("bottom_margin_dp", readerBottomMargin).apply() })
+                    Text("Backup", style = MaterialTheme.typography.titleSmall)
+                    Text("Backups include reading positions, bookmarks, shelves, and settings. Book files are not included; import your books before restoring on another device.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { exportBackup.launch("Vellurix-backup.json") }) { Text("Export backup") }
+                        OutlinedButton(onClick = { importBackup.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }) { Text("Import backup") }
+                    }
                     Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             },
@@ -760,7 +819,7 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: B
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, progress: BookProgress, progressDisplay: String, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, progress: BookProgress, progressDisplay: String, compactProgress: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
     val fallback = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(fallback.first) }
     val rowColor by animateColorAsState(androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f), tween(260), label = "book row cover tint")
@@ -772,8 +831,12 @@ private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boo
                 Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LinearProgressIndicator(progress = { progress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
-                    Text(progressLabel(progress, progressDisplay), color = textColor.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
+                    if (compactProgress) {
+                        Text(progressLabel(progress, "percent"), color = textColor.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
+                    } else {
+                        LinearProgressIndicator(progress = { progress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
+                        Text(progressLabel(progress, progressDisplay), color = textColor.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
             if (selected) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
