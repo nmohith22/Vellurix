@@ -37,9 +37,12 @@ internal interface CoverBookInfo {
     val title: String
 }
 
-private fun extractCover(context: Context, uriString: String, format: String): Bitmap? = runCatching {
+internal fun cachedCoverFile(context: Context, uriString: String): File =
+    File(context.cacheDir, "book-covers/${uriString.hashCode().toUInt().toString(16)}.png")
+
+internal fun extractCover(context: Context, uriString: String, format: String): Bitmap? = runCatching {
     val uri = Uri.parse(uriString)
-    val cache = File(context.cacheDir, "book-covers/${uriString.hashCode().toUInt().toString(16)}.png")
+    val cache = cachedCoverFile(context, uriString)
     if (cache.isFile) BitmapFactory.decodeFile(cache.path)?.let { return it }
     cache.parentFile?.mkdirs()
     val bitmap = when (format.uppercase()) {

@@ -71,6 +71,9 @@ import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.shared.util.toAbsoluteUrl
 import org.readium.r2.shared.util.toUrl
+import org.readium.r2.shared.publication.services.locateProgression
+import org.readium.r2.shared.publication.services.locate
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
@@ -132,12 +135,21 @@ class ReaderActivity : FragmentActivity() {
     private var twoColumns by mutableStateOf(false)
     private var transition by mutableStateOf("page turn")
     private var readerRoot: FrameLayout? = null
+    private var readingProgress by mutableStateOf(ReaderProgressUi())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val uri = intent.getStringExtra(EXTRA_URI)?.let(Uri::parse)
         if (uri == null) { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Reading"
+        val format = intent.getStringExtra(EXTRA_FORMAT).orEmpty()
+        val summary = getSharedPreferences("reading_summary", MODE_PRIVATE)
+        summary.edit().putString("last_uri", uri.toString()).putString("last_title", title).putString("last_format", format).apply()
+        readingProgress = ReaderProgressUi(
+            fraction = summary.getFloat("${uri}|fraction", 0f),
+            position = summary.getInt("${uri}|position", 0).takeIf { it > 0 },
+            total = summary.getInt("${uri}|total", 0).takeIf { it > 0 },
+        )
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
         containerId = READER_CONTAINER_ID
         val root = FrameLayout(this).apply { setBackgroundColor(AndroidColor.rgb(250, 249, 246)) }
@@ -169,6 +181,7 @@ class ReaderActivity : FragmentActivity() {
                     supportsTwoColumns = intent.getStringExtra(EXTRA_FORMAT) == "EPUB",
                     toc = toc,
                     bookmarks = bookmarks,
+                    progress = readingProgress,
                     onDrawerOpenChange = { drawerOpen = it },
                     onSettingsOpenChange = { settingsOpen = it },
                     onHideControls = { controlsVisible = false },
@@ -184,6 +197,7 @@ class ReaderActivity : FragmentActivity() {
                         if (value.startsWith("toc:")) host?.navigateToToc(value.substringAfter(':').toIntOrNull() ?: -1)
                         else parseSavedLocator(value)?.let { host?.navigateTo(it) }
                     },
+                    onSeek = { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.seekToProgression(it) },
                     onBookmark = ::addBookmark,
                     onRemoveBookmark = ::removeBookmark,
                     onAppearance = ::saveAppearance,
@@ -291,6 +305,7 @@ class ReaderActivity : FragmentActivity() {
             if (previous?.bottomMarginDp != value.bottomMarginDp) editor.putFloat(prefix + "bottom_margin_dp", value.bottomMarginDp)
         }.apply()
         window.decorView.setBackgroundColor(value.background)
+        readerRoot?.setBackgroundColor(value.background)
         (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance()
     }
 
@@ -329,6 +344,24 @@ class ReaderActivity : FragmentActivity() {
     private fun removeBookmark(bookmark: ReaderBookmark) = saveBookmarks(bookmarks.filterNot { it.locator == bookmark.locator })
 
     internal fun toggleReaderControls() { controlsVisible = !controlsVisible }
+
+    internal fun updateProgress(uri: String, locator: org.readium.r2.shared.publication.Locator, total: Int, sections: List<ReaderProgressSection>) {
+        val currentPosition = locator.locations.position
+        val fraction = (locator.locations.totalProgression?.toFloat()
+            ?: if (currentPosition != null && total > 0) currentPosition.toFloat() / total else 0f).coerceIn(0f, 1f)
+        val position = currentPosition?.takeIf { it > 0 }
+            ?: total.takeIf { it > 0 }?.let { (fraction * it).toInt().plus(1).coerceAtMost(it) }
+        readingProgress = ReaderProgressUi(fraction, position, total.takeIf { it > 0 }, sections)
+        getSharedPreferences("reading_summary", MODE_PRIVATE).edit()
+            .putFloat("${uri}|fraction", fraction).putInt("${uri}|position", position ?: 0).putInt("${uri}|total", total.coerceAtLeast(0)).apply()
+    }
+
+    internal fun updateFlowingProgress(uri: String, fraction: Float, position: Int, total: Int) {
+        val safeFraction = fraction.coerceIn(0f, 1f)
+        readingProgress = ReaderProgressUi(safeFraction, position.coerceAtLeast(1), total.coerceAtLeast(1))
+        getSharedPreferences("reading_summary", MODE_PRIVATE).edit()
+            .putFloat("${uri}|fraction", safeFraction).putInt("${uri}|position", position.coerceAtLeast(1)).putInt("${uri}|total", total.coerceAtLeast(1)).apply()
+    }
 
     internal fun onNavigatorReady(host: ReaderHostFragment, nav: VisualNavigator, links: List<org.readium.r2.shared.publication.Link>, depths: List<Int>) {
         toc = links.mapIndexed { index, link -> ReaderNavItem(link.title ?: "Section ${index + 1}", depths.getOrElse(index) { 0 }, "toc:$index") }
@@ -397,13 +430,16 @@ class ReaderHostFragment : Fragment() {
     private var pageTurnAnimator: ValueAnimator? = null
     private var pageTurnOverlay: PageTurnOverlay? = null
     private var turningPage = false
+    private var totalPositions = 0
+    private var progressSections = emptyList<ReaderProgressSection>()
 
     fun applyAppearance() {
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
         (view as? FrameLayout)?.let { host ->
             val density = resources.displayMetrics.density
+            host.setBackgroundColor(appearance.background)
             host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
-            host.clipToPadding = false
+            host.clipToPadding = true
         }
         when (arguments?.getString(ARG_FORMAT).orEmpty()) {
             "TXT", "HTML", "HTM", "FB2", "RTF" -> {
@@ -540,6 +576,18 @@ class ReaderHostFragment : Fragment() {
         (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.go(locator, true)
     }
 
+    fun seekToProgression(progression: Float) {
+        flowingScroll?.let { scroll ->
+            val range = (scroll.getChildAt(0)?.height?.minus(scroll.height)?.coerceAtLeast(0) ?: 0)
+            scroll.scrollTo(0, (range * progression.coerceIn(0f, 1f)).toInt())
+            return
+        }
+        val value = publication ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            value.locateProgression(progression.coerceIn(0f, 1f).toDouble())?.let { navigateTo(it) }
+        }
+    }
+
     fun currentLocator(): org.readium.r2.shared.publication.Locator? =
         (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.currentLocator?.value
 
@@ -564,11 +612,11 @@ class ReaderHostFragment : Fragment() {
         FrameLayout(requireContext()).also {
             containerId = READER_CONTENT_ID
             it.id = containerId
-            it.setBackgroundColor(AndroidColor.rgb(246, 243, 238))
             val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+            it.setBackgroundColor(appearance.background)
             val density = resources.displayMetrics.density
             it.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
-            it.clipToPadding = false
+            it.clipToPadding = true
         }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -614,6 +662,24 @@ class ReaderHostFragment : Fragment() {
                 tocLinks = flattenedToc.map { it.first }
                 tocDepths = flattenedToc.map { it.second }
                 this@ReaderHostFragment.publication = publication
+                val positions = runCatching { publication.positions() }.getOrDefault(emptyList())
+                totalPositions = positions.size
+                val locatedSections = mutableListOf<ReaderProgressSection>()
+                tocLinks.forEachIndexed { index, link ->
+                    val linkLocator = publication.locatorFromLink(link)
+                    val resolved = linkLocator?.let { runCatching { publication.locate(it) }.getOrNull() }
+                    val href = link.href.toString().substringBefore('#').substringBefore('?')
+                    val located = positions.firstOrNull { it.href.toString().substringBefore('#').substringBefore('?') == href }
+                    val start = resolved?.locations?.totalProgression
+                        ?: resolved?.locations?.position?.let { if (totalPositions > 0) (it - 1).toDouble() / totalPositions else null }
+                        ?: located?.locations?.totalProgression
+                        ?: located?.locations?.position?.let { if (totalPositions > 0) (it - 1).toDouble() / totalPositions else null }
+                    start?.let { locatedSections.add(ReaderProgressSection(link.title ?: "Section ${index + 1}", it.toFloat().coerceIn(0f, 1f))) }
+                }
+                val orderedSections = locatedSections.sortedBy { it.start }
+                progressSections = orderedSections.ifEmpty {
+                    tocLinks.mapIndexed { index, link -> ReaderProgressSection(link.title ?: "Section ${index + 1}", index.toFloat() / tocLinks.size.coerceAtLeast(1)) }
+                }
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 if (format == "EPUB") configuredMode = readerMode(loadReaderAppearance(context, uri.toString()), viewportWidthPx, viewportHeightPx)
@@ -633,7 +699,7 @@ class ReaderHostFragment : Fragment() {
         (view as? FrameLayout)?.let { host ->
             val density = resources.displayMetrics.density
             host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
-            host.clipToPadding = false
+            host.clipToPadding = true
         }
         childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
         else EpubNavigatorFactory(value).createFragmentFactory(
@@ -650,7 +716,15 @@ class ReaderHostFragment : Fragment() {
         val key = arguments?.getString(ARG_URI).orEmpty()
         (fragment as? Navigator)?.let { navigator ->
             locatorSaveJob = viewLifecycleOwner.lifecycleScope.launch {
-                navigator.currentLocator.collect { current -> progress.edit().putString(key, current.toJSON().toString()).apply() }
+                navigator.currentLocator.collect { current ->
+                    progress.edit().putString(key, current.toJSON().toString()).apply()
+                    (activity as? ReaderActivity)?.updateProgress(
+                        key,
+                        current,
+                        totalPositions,
+                        progressSections,
+                    )
+                }
             }
         }
     }
@@ -701,6 +775,10 @@ class ReaderHostFragment : Fragment() {
             addView(content)
             setOnScrollChangeListener { _, _, y, _, _ ->
                 pendingScrollY = y
+                val pageSize = (height * .82f).toInt().coerceAtLeast(1)
+                val scrollRange = (getChildAt(0)?.height?.minus(height)?.coerceAtLeast(0) ?: 0)
+                val totalPages = (scrollRange / pageSize) + 1
+                (activity as? ReaderActivity)?.updateFlowingProgress(key, if (scrollRange > 0) y.toFloat() / scrollRange else 0f, (y / pageSize) + 1, totalPages)
                 scrollSaveJob?.cancel()
                 scrollSaveJob = viewLifecycleOwner.lifecycleScope.launch {
                     delay(350)
@@ -887,4 +965,3 @@ internal fun formatText(raw: String, format: String): String = when (format) {
     }
     else -> raw
 }
-

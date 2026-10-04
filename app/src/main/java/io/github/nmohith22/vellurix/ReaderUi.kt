@@ -12,6 +12,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -50,9 +54,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 internal data class ReaderNavItem(val title: String, val depth: Int, val locator: String)
 internal data class ReaderBookmark(val title: String, val locator: String, val page: Int? = null)
+internal data class ReaderProgressUi(val fraction: Float = 0f, val position: Int? = null, val total: Int? = null, val sections: List<ReaderProgressSection> = emptyList())
 
 @Composable
 internal fun ReaderOverlay(
@@ -69,6 +78,7 @@ internal fun ReaderOverlay(
     supportsTwoColumns: Boolean,
     toc: List<ReaderNavItem>,
     bookmarks: List<ReaderBookmark>,
+    progress: ReaderProgressUi,
     onDrawerOpenChange: (Boolean) -> Unit,
     onSettingsOpenChange: (Boolean) -> Unit,
     onHideControls: () -> Unit,
@@ -76,6 +86,7 @@ internal fun ReaderOverlay(
     onRotate: () -> Unit,
     onTurn: (Boolean) -> Unit,
     onNavigate: (String) -> Unit,
+    onSeek: (Float) -> Unit,
     onBookmark: () -> Unit,
     onRemoveBookmark: (ReaderBookmark) -> Unit,
     onAppearance: (ReaderAppearance) -> Unit,
@@ -143,21 +154,24 @@ internal fun ReaderOverlay(
                     modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 20.dp),
                     shape = RoundedCornerShape(24.dp), color = panel, shadowElevation = 12.dp,
                 ) {
-                    Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = fg, modifier = Modifier.size(30.dp)) }
-                        AnimatedVisibility(visible = !themeCarousel) { IconButton(modifier = Modifier.size(40.dp), onClick = { themeCarousel = true }) { Icon(Icons.Rounded.ColorLens, "Theme", tint = fg) } }
-                        AnimatedVisibility(visible = themeCarousel, modifier = Modifier.weight(1f)) {
-                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
-                                listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) ->
-                                    val pair = readerPreset(id)
-                                    Surface(onClick = { onTheme(id); themeCarousel = false }, color = Color(pair.first), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(label, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(pair.second), style = MaterialTheme.typography.labelSmall) }
+                    Column {
+                        ReaderProgressSeeker(progress, fg, accent, onSeek)
+                        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = fg, modifier = Modifier.size(30.dp)) }
+                            AnimatedVisibility(visible = !themeCarousel) { IconButton(modifier = Modifier.size(40.dp), onClick = { themeCarousel = true }) { Icon(Icons.Rounded.ColorLens, "Theme", tint = fg) } }
+                            AnimatedVisibility(visible = themeCarousel, modifier = Modifier.weight(1f)) {
+                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
+                                    listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) ->
+                                        val pair = readerPreset(id)
+                                        Surface(onClick = { onTheme(id); themeCarousel = false }, color = Color(pair.first), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(label, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(pair.second), style = MaterialTheme.typography.labelSmall) }
+                                    }
                                 }
                             }
+                            IconButton(modifier = Modifier.size(40.dp), onClick = onRotate) { Icon(if (autoRotate) Icons.Rounded.ScreenRotation else Icons.Rounded.ScreenLockPortrait, if (autoRotate) "Auto rotate on" else "Portrait locked", tint = if (autoRotate) accent else fg) }
+                            IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = false; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.MenuBook, "Contents", tint = fg) }
+                            IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = true; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.Bookmark, "Bookmarks", tint = fg) }
+                            IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(true) }) { Icon(Icons.Rounded.KeyboardArrowRight, "Next page", tint = fg, modifier = Modifier.size(30.dp)) }
                         }
-                        IconButton(modifier = Modifier.size(40.dp), onClick = onRotate) { Icon(if (autoRotate) Icons.Rounded.ScreenRotation else Icons.Rounded.ScreenLockPortrait, if (autoRotate) "Auto rotate on" else "Portrait locked", tint = if (autoRotate) accent else fg) }
-                        IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = false; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.MenuBook, "Contents", tint = fg) }
-                        IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = true; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.Bookmark, "Bookmarks", tint = fg) }
-                        IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(true) }) { Icon(Icons.Rounded.KeyboardArrowRight, "Next page", tint = fg, modifier = Modifier.size(30.dp)) }
                     }
                 }
             }
@@ -246,6 +260,90 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                         if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = onDismiss) { Text("Done") } }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, accent: Color, onSeek: (Float) -> Unit) {
+    var dragging by remember { mutableStateOf(false) }
+    var fingerProgress by remember { mutableFloatStateOf(progress.fraction.coerceIn(0f, 1f)) }
+    val scope = rememberCoroutineScope()
+    val expansion by animateFloatAsState(if (dragging) 1f else 0f, spring(dampingRatio = .72f, stiffness = 520f), label = "progress seeker size")
+    val position = if (dragging) fingerProgress else progress.fraction.coerceIn(0f, 1f)
+    val section = sectionIndexAt(position, progress.sections)
+    val page = if (dragging && progress.total != null) (position * progress.total).toInt().plus(1).coerceAtMost(progress.total) else progress.position
+    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 2.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("${page ?: "—"} / ${progress.total ?: "—"}", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
+            Text("${(position * 100).toInt()}%", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().height(42.dp)) {
+            val currentWidth = maxWidth
+            Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(30.dp).pointerInput(progress.sections.size) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    fingerProgress = (down.position.x / size.width).coerceIn(0f, 1f)
+                    val slop = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                        dragging = true
+                        change.consume()
+                    }
+                    if (slop == null) {
+                        dragging = true
+                        onSeek(fingerProgress)
+                        scope.launch { delay(360); dragging = false }
+                    }
+                    else {
+                        fingerProgress = (slop.position.x / size.width).coerceIn(0f, 1f)
+                        val completed = drag(slop.id) { change ->
+                            fingerProgress = (change.position.x / size.width).coerceIn(0f, 1f)
+                            change.consume()
+                        }
+                        dragging = false
+                        if (completed) onSeek(fingerProgress)
+                    }
+                }
+            }) {
+                val boundaries = if (progress.sections.isEmpty()) (0..24).map { it / 24f } else progress.sections.map { it.start.coerceIn(0f, 1f) }.distinct().sorted().let { starts ->
+                    (if (starts.firstOrNull() == 0f) starts else listOf(0f) + starts).let { if (it.lastOrNull() == 1f) it else it + 1f }
+                }
+                val centerY = size.height * .64f
+                val base = 1.6.dp.toPx() + expansion * 1.3.dp.toPx()
+                val peak = 8.dp.toPx() * expansion
+                val sigma = (size.width * .11f).coerceAtLeast(1f)
+                repeat((boundaries.size - 1).coerceAtLeast(1)) { index ->
+                    val start = boundaries.getOrNull(index) ?: 0f
+                    val end = boundaries.getOrNull(index + 1) ?: 1f
+                    val gap = 2.dp.toPx().coerceAtMost(size.width * (end - start) / 3f)
+                    val left = start * size.width + gap / 2f
+                    val right = end * size.width - gap / 2f
+                    val x = (left + right) / 2f
+                    val distance = (x - position * size.width) / sigma
+                    val envelope = kotlin.math.exp(-.5f * distance * distance)
+                    val height = base + peak * envelope
+                    val color = if (x / size.width <= position) accent else foreground.copy(alpha = .24f)
+                    drawRoundRect(
+                        color = color,
+                        topLeft = androidx.compose.ui.geometry.Offset(left, centerY - height / 2f),
+                        size = androidx.compose.ui.geometry.Size((right - left).coerceAtLeast(1f), height.coerceAtLeast(1f)),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(height, height),
+                    )
+                }
+                val thumbX = position * size.width
+                drawCircle(accent, radius = (2.2.dp.toPx() + 4.dp.toPx() * expansion), center = androidx.compose.ui.geometry.Offset(thumbX, centerY))
+            }
+            if (dragging && section != null) {
+                val title = progress.sections.getOrNull(section)?.title?.takeIf(String::isNotBlank) ?: "Section ${section + 1}"
+                Surface(
+                    modifier = Modifier.align(Alignment.TopStart).offset(x = (currentWidth * position - 82.dp).coerceIn(0.dp, (currentWidth - 164.dp).coerceAtLeast(0.dp))),
+                    shape = RoundedCornerShape(9.dp), color = foreground.copy(alpha = .92f),
+                ) {
+                    Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
+                        Text("${section + 1}. $title", color = if (foreground.luminance() < .5f) Color.White else Color(0xFF202020), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Page ${page ?: "—"}", color = if (foreground.luminance() < .5f) Color.LightGray else Color(0xFF666666), style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp))
+                    }
                 }
             }
         }

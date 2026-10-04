@@ -2,12 +2,13 @@
     android:id="@+id/book_widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F6F3EE"
+    android:background="#22F47A20"
     android:padding="2dp">
     <ImageView
         android:id="@+id/book_cover"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:contentDescription="Book cover"
-        android:scaleType="centerCrop" />
+        android:scaleType="centerCrop"
+        android:adjustViewBounds="true" />
 </FrameLayout>

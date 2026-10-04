@@ -6,5 +6,7 @@
     android:initialLayout="@layout/widget_book"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
     android:configure="io.github.nmohith22.vellurix.WidgetConfigureActivity"
     android:updatePeriodMillis="0" />

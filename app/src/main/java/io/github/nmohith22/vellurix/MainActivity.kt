@@ -135,6 +135,8 @@ private fun FolioApp(resumeTick: Int) {
     val readerSettings = remember { context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE) }
     var layoutMode by rememberSaveable { mutableStateOf(settings.getString("layout", "cards") ?: "cards") }
     var cardSize by rememberSaveable { mutableFloatStateOf(settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)) }
+    var progressDisplay by rememberSaveable { mutableStateOf(settings.getString("progress_display", "percent") ?: "percent") }
+    var recentBookUri by remember { mutableStateOf(context.getSharedPreferences("reading_summary", android.content.Context.MODE_PRIVATE).getString("last_uri", null)) }
     var coverOnlyCards by rememberSaveable { mutableStateOf(settings.getBoolean("cover_only_cards", false)) }
     var appTheme by rememberSaveable { mutableStateOf(settings.getString("app_theme", "paper") ?: "paper") }
     var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
@@ -157,6 +159,8 @@ private fun FolioApp(resumeTick: Int) {
         if (resumeTick > 0) {
             layoutMode = settings.getString("layout", "cards") ?: "cards"
             cardSize = settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)
+            progressDisplay = settings.getString("progress_display", "percent") ?: "percent"
+            recentBookUri = context.getSharedPreferences("reading_summary", android.content.Context.MODE_PRIVATE).getString("last_uri", null)
             coverOnlyCards = settings.getBoolean("cover_only_cards", false)
             appTheme = settings.getString("app_theme", "paper") ?: "paper"
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
@@ -291,6 +295,23 @@ private fun FolioApp(resumeTick: Int) {
                     IconButton(modifier = Modifier.size(40.dp), onClick = { searchOpen = !searchOpen; if (!searchOpen) search = "" }) { Icon(Icons.Rounded.Search, "Search your library", tint = appColors.third) }
                 }
             }
+            val recentBook = books.firstOrNull { it.uri == recentBookUri }
+            if (recentBook != null && !searchOpen) {
+                val recentProgress = loadBookProgress(context, recentBook.uri)
+                Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).clickable { openBook(recentBook) }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.size(width = 44.dp, height = 60.dp).clip(RoundedCornerShape(8.dp)).background(Brush.verticalGradient(CoverColors[(recentBook.title.hashCode() and Int.MAX_VALUE) % CoverColors.size].let { listOf(it.first, it.second) }))) {
+                            BookCover(recentBook, Modifier.fillMaxSize())
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("CONTINUE READING", style = MaterialTheme.typography.labelSmall, color = appAccent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(recentBook.title, style = MaterialTheme.typography.titleSmall, color = appColors.third, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(progressLabel(recentProgress, progressDisplay), style = MaterialTheme.typography.bodySmall, color = Muted)
+                            LinearProgressIndicator(progress = { recentProgress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = appAccent, trackColor = appAccent.copy(alpha = .18f))
+                        }
+                    }
+                }
+            }
             AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(), exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()) {
                 OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).focusRequester(searchFocus), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, trailingIcon = { IconButton(onClick = { search = ""; searchOpen = false }) { Icon(Icons.Rounded.Close, "Close search") } }, shape = RoundedCornerShape(18.dp))
             }
@@ -339,13 +360,13 @@ private fun FolioApp(resumeTick: Int) {
             } else {
                 if (layoutMode == "cards") {
                     LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, selected = book.uri in selectedBooks, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book }) }
+                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book }) }
                     }
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(visibleBooks.size, key = { visibleBooks[it].uri }) { index ->
                             val book = visibleBooks[index]
-                            BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
+                            BookRow(book, cardSize, appColors.third, selected = book.uri in selectedBooks, progress = loadBookProgress(context, book.uri), progressDisplay = progressDisplay, onClick = { if (selectedBooks.isNotEmpty()) toggleSelection(book) else openBook(book) }, onLongClick = { selectedBook = book })
                         }
                     }
                 }
@@ -396,6 +417,11 @@ private fun FolioApp(resumeTick: Int) {
                     }
                     Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
                     Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
+                    Text("Book progress", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = progressDisplay == "percent", onClick = { progressDisplay = "percent"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Percent") })
+                        FilterChip(selected = progressDisplay == "pages", onClick = { progressDisplay = "pages"; settings.edit().putString("progress_display", progressDisplay).apply() }, label = { Text("Pages") })
+                    }
                     if (layoutMode == "cards") {
                         Text("Card labels", style = MaterialTheme.typography.titleSmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -626,7 +652,7 @@ private fun removeManagedCopy(context: android.content.Context, uriString: Strin
 
 private fun migrateBookState(context: android.content.Context, fromUri: String, toUri: String) {
     if (fromUri == toUri) return
-    listOf("reading_progress", "reader_book_appearance").forEach { name ->
+    listOf("reading_progress", "reader_book_appearance", "reading_summary").forEach { name ->
         val prefs = context.getSharedPreferences(name, android.content.Context.MODE_PRIVATE)
         val values = prefs.all.filterKeys { it == fromUri || it.startsWith("$fromUri|") }
         val editor = prefs.edit()
@@ -649,9 +675,25 @@ private fun migrateBookState(context: android.content.Context, fromUri: String, 
     editor.apply()
 }
 
+private fun loadBookProgress(context: android.content.Context, uri: String): BookProgress {
+    val summary = context.getSharedPreferences("reading_summary", android.content.Context.MODE_PRIVATE)
+    var fraction = summary.getFloat("${uri}|fraction", -1f)
+    var position = summary.getInt("${uri}|position", 0).takeIf { it > 0 }
+    val total = summary.getInt("${uri}|total", 0).takeIf { it > 0 }
+    if (fraction < 0f) {
+        val saved = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE).getString(uri, null)
+        runCatching {
+            val locations = JSONObject(saved).getJSONObject("locations")
+            fraction = locations.optDouble("totalProgression", -1.0).toFloat()
+            position = locations.optInt("position", 0).takeIf { it > 0 }
+        }
+    }
+    return BookProgress(fraction.takeIf { it >= 0f }?.coerceIn(0f, 1f) ?: 0f, position, total)
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, selected: Boolean, progress: BookProgress, progressDisplay: String, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(colors.first) }
     val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
@@ -662,23 +704,31 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: B
                 if (selected) Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) { Icon(Icons.Rounded.Check, "Selected", Modifier.padding(5.dp).size(18.dp), tint = Color.White) }
             }
             if (showTitle) Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (showTitle) Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+            if (showTitle) Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 7.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LinearProgressIndicator(progress = { progress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
+                Text(progressLabel(progress, progressDisplay), style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = .72f), maxLines = 1)
+            }
         }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookRow(book: BookItem, size: Float, textColor: Color, selected: Boolean, progress: BookProgress, progressDisplay: String, onClick: () -> Unit, onLongClick: () -> Unit) {
     val fallback = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(fallback.first) }
     val rowColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
-    Card(modifier = Modifier.fillMaxWidth().height((94 * size).dp).combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = rowColor)) {
+    Card(modifier = Modifier.fillMaxWidth().height((110 * size).dp).combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = rowColor)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxSize().padding(10.dp)) {
             Box(Modifier.width((54 * size).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(fallback.first, fallback.second)))) { BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) }) }
             Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LinearProgressIndicator(progress = { progress.fraction.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
+                    Text(progressLabel(progress, progressDisplay), color = textColor.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
+                }
             }
             if (selected) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
         }

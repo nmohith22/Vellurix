@@ -4,7 +4,7 @@ An offline-first Android reader for EPUB, PDF, TXT, HTML, FB2, and basic RTF. It
 
 ## Download
 
-**[Download Vellurix 0.1.14 for Android](https://github.com/nmohith22/Vellurix/raw/refs/heads/main/release/Vellurix-0.1.14.apk)**
+**[Download Vellurix 0.1.15 for Android](https://github.com/nmohith22/Vellurix/raw/refs/heads/main/release/Vellurix-0.1.15.apk)**
 
 Download the APK on your Android device, open it from Downloads, and follow Android's install prompt. Install it over your existing Vellurix app without uninstalling first to keep its local library, shelves, settings, widgets, and reading progress. Android may ask you to allow your browser or file manager to install apps from that source.
 
@@ -20,9 +20,13 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 - Tap a book card or list row to read it. Choose card covers with or without titles; list rows always show both. Long-press to rename the in-app title, open live per-book reader settings, assign a shelf, select books for batch shelf moves, or remove a book.
 - Switch the library between card and list views, resize the items, and change the app theme from Settings.
 - See embedded EPUB covers and first-page PDF previews in the library; each card and row picks up a tint from its cover.
+- See each book's reading progress on library cards and list rows, displayed as a percentage or position count. A continue-reading banner opens your most recent book.
 - Let the library discover new files when it opens, or run **Populate from folder** in Settings. Removed books stay excluded from scans; import a removed book explicitly to add it back. Create shelves and add book or shelf widgets to the home screen.
 - Open library search from the top bar; the field expands on demand and collapses when cleared.
 - Adapts to phones and foldable displays; the reader hides system bars and reveals them temporarily on a swipe.
+- Book and shelf widgets show book covers, resize with the launcher, and open the selected book when tapped. The picker shows cover previews and keeps clear of display cutouts.
+- The launcher icon uses an orange and black book design by default and supports One UI themed icons.
+- Scrub through a book from the reader's chapter-segmented progress seeker; it previews the section under your finger and navigates when released.
 
 ## License
 

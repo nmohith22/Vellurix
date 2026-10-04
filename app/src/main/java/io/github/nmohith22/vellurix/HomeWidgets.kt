@@ -1,6 +1,5 @@
 ﻿package io.github.nmohith22.vellurix
 
-import android.app.Activity
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -10,20 +9,40 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.BitmapFactory
 import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Bundle
 import android.util.LruCache
 import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.RemoteViews
+import android.os.Handler
+import android.os.Looper
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 
-private data class WidgetBook(val uri: String, val title: String, val format: String, val shelf: String)
+private data class WidgetBook(override val uri: String, override val title: String, override val format: String, val shelf: String) : CoverBookInfo
 
 private object WidgetLibrary {
     fun books(context: Context): List<WidgetBook> = runCatching {
@@ -39,7 +58,7 @@ private object WidgetLibrary {
     }.getOrDefault(listOf("All books"))
 }
 
-class WidgetConfigureActivity : Activity() {
+class WidgetConfigureActivity : ComponentActivity() {
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,32 +68,39 @@ class WidgetConfigureActivity : Activity() {
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
         val provider = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId)?.provider?.className.orEmpty()
         val chooseShelf = provider.endsWith("ShelfWidgetProvider")
-        val items = if (chooseShelf) WidgetLibrary.shelves(this) else WidgetLibrary.books(this).map { it.title }
-        val title = if (chooseShelf) "Choose a shelf" else "Choose a book"
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 20, 24, 16) }
-        root.addView(TextView(this).apply { text = title; textSize = 22f; setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, 14) })
-        if (items.isEmpty()) {
-            root.addView(TextView(this).apply { text = "Add a book to Vellurix first."; textSize = 16f })
-            root.addView(Button(this).apply { text = "Open library"; setOnClickListener { startActivity(Intent(this@WidgetConfigureActivity, MainActivity::class.java)); finish() } })
-        } else {
-            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            items.forEachIndexed { index, item ->
-                list.addView(Button(this).apply {
-                    text = item
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    setOnClickListener { finishConfiguration(chooseShelf, index, item) }
-                }, LinearLayout.LayoutParams(-1, 52))
+        val books = WidgetLibrary.books(this)
+        val shelves = WidgetLibrary.shelves(this)
+        setContent {
+            MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFFE97824), background = Color(0xFFFFF8F1), surface = Color.White)) {
+                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 12.dp)) {
+                        Text("VELLURIX WIDGET", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                        Text(if (chooseShelf) "Choose a shelf" else "Choose a book", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                        Text(if (chooseShelf) "Tap any cover in the widget to open that book." else "Choose a cover for your home screen.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if ((!chooseShelf && books.isEmpty()) || (chooseShelf && shelves.isEmpty())) {
+                        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text(if (chooseShelf) "Create a shelf first." else "Add a book to your library first.", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { startActivity(Intent(this@WidgetConfigureActivity, MainActivity::class.java)); finish() }) { Text("Open library") }
+                        }
+                    } else LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (chooseShelf) items(shelves, key = { it }) { shelf ->
+                            WidgetShelfChoice(shelf, books.filter { shelf == "All books" || it.shelf == shelf }) { finishConfiguration(true, null, shelf) }
+                        } else items(books, key = { it.uri }) { book ->
+                            WidgetBookChoice(book) { finishConfiguration(false, book, null) }
+                        }
+                    }
+                }
             }
-            root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
         }
-        setContentView(root)
     }
 
-    private fun finishConfiguration(chooseShelf: Boolean, index: Int, selected: String) {
+    private fun finishConfiguration(chooseShelf: Boolean, book: WidgetBook?, shelf: String?) {
         val prefs = getSharedPreferences("folio_widgets", MODE_PRIVATE).edit()
-        if (chooseShelf) prefs.putString("shelf_$widgetId", selected)
-        else WidgetLibrary.books(this).getOrNull(index)?.let { book ->
-            prefs.putString("book_uri_$widgetId", book.uri).putString("book_title_$widgetId", book.title).putString("book_format_$widgetId", book.format)
+        if (chooseShelf) prefs.putString("shelf_$widgetId", shelf)
+        else book?.let {
+            prefs.putString("book_uri_$widgetId", it.uri).putString("book_title_$widgetId", it.title).putString("book_format_$widgetId", it.format)
         }
         prefs.apply()
         val manager = AppWidgetManager.getInstance(this)
@@ -85,22 +111,64 @@ class WidgetConfigureActivity : Activity() {
     }
 }
 
+@Composable
+private fun WidgetBookChoice(book: WidgetBook, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(18.dp)) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(width = 62.dp, height = 86.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFEFE5D8))) {
+                Image(CoverArtwork.create(book.title, book.format, 128, 184).asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                BookCover(book, Modifier.fillMaxSize())
+            }
+            Column(Modifier.weight(1f)) {
+                Text(book.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(book.format, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Choose", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun WidgetShelfChoice(shelf: String, books: List<WidgetBook>, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(shelf, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${books.size} ${if (books.size == 1) "book" else "books"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("Choose", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
+            if (books.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                books.take(5).forEach { book ->
+                    Box(Modifier.weight(1f).aspectRatio(.7f).clip(RoundedCornerShape(8.dp)).background(Color(0xFFEFE5D8))) {
+                        Image(CoverArtwork.create(book.title, book.format, 96, 138).asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        BookCover(book, Modifier.fillMaxSize())
+                    }
+                }
+            }
+        }
+    }
+}
+
 class BookWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) = ids.forEach { render(context, manager, it) }
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) = render(context, manager, id)
 
     companion object {
-        fun render(context: Context, manager: AppWidgetManager, id: Int) {
+        fun render(context: Context, manager: AppWidgetManager, id: Int, loadMissingCovers: Boolean = true) {
             val prefs = context.getSharedPreferences("folio_widgets", Context.MODE_PRIVATE)
             val title = prefs.getString("book_title_$id", "Choose a book") ?: "Choose a book"
             val uri = prefs.getString("book_uri_$id", null)
             val format = prefs.getString("book_format_$id", "EPUB") ?: "EPUB"
             val views = RemoteViews(context.packageName, R.layout.widget_book)
-            views.setImageViewBitmap(R.id.book_cover, CoverArtwork.create(title, format))
+            val book = uri?.let { WidgetBook(it, title, format, "") }
+            views.setImageViewBitmap(R.id.book_cover, book?.let { widgetCover(context, it) } ?: CoverArtwork.create(title, format, 240, 350))
             views.setContentDescription(R.id.book_cover, title)
             if (uri != null) views.setOnClickPendingIntent(R.id.book_widget_root, openBook(context, id, uri, title, format))
             else views.setOnClickPendingIntent(R.id.book_widget_root, PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             manager.updateAppWidget(id, views)
+            if (loadMissingCovers && book != null) loadWidgetCovers(context, listOf(book)) { render(context, AppWidgetManager.getInstance(context), id, false) }
         }
     }
 }
@@ -110,7 +178,7 @@ class ShelfWidgetProvider : AppWidgetProvider() {
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) = render(context, manager, id)
 
     companion object {
-        fun render(context: Context, manager: AppWidgetManager, id: Int) {
+        fun render(context: Context, manager: AppWidgetManager, id: Int, loadMissingCovers: Boolean = true) {
             val shelf = context.getSharedPreferences("folio_widgets", Context.MODE_PRIVATE).getString("shelf_$id", "All books") ?: "All books"
             val allBooks = WidgetLibrary.books(context)
             val books = if (shelf == "All books") allBooks else allBooks.filter { it.shelf == shelf }
@@ -129,7 +197,7 @@ class ShelfWidgetProvider : AppWidgetProvider() {
                 val row = RemoteViews(context.packageName, R.layout.widget_shelf_row)
                 rowBooks.forEach { book ->
                     val cell = RemoteViews(context.packageName, R.layout.widget_shelf_book)
-                    cell.setImageViewBitmap(R.id.shelf_book_cover, CoverArtwork.create(book.title, book.format, 220, 300))
+                    cell.setImageViewBitmap(R.id.shelf_book_cover, widgetCover(context, book, 96, 138) ?: CoverArtwork.create(book.title, book.format, 96, 138))
                     cell.setTextViewText(R.id.shelf_book_title, book.title)
                     cell.setOnClickPendingIntent(R.id.shelf_book_cell, openBook(context, id * 100 + book.uri.hashCode(), book.uri, book.title, book.format))
                     row.addView(R.id.shelf_widget_row, cell)
@@ -138,8 +206,31 @@ class ShelfWidgetProvider : AppWidgetProvider() {
             }
             views.setOnClickPendingIntent(R.id.shelf_title, PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             manager.updateAppWidget(id, views)
+            if (loadMissingCovers) loadWidgetCovers(context, visible) { render(context, AppWidgetManager.getInstance(context), id, false) }
         }
     }
+}
+
+private fun widgetCover(context: Context, book: WidgetBook, targetWidth: Int = 192, targetHeight: Int = 280): Bitmap? {
+    val file = cachedCoverFile(context, book.uri)
+    if (!file.isFile) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.path, bounds)
+    val sample = maxOf(bounds.outWidth / targetWidth, bounds.outHeight / targetHeight, 1)
+    val source = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+    val scale = minOf(targetWidth.toFloat() / source.width, targetHeight.toFloat() / source.height, 1f)
+    val small = Bitmap.createScaledBitmap(source, (source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), true)
+    if (small !== source) source.recycle()
+    return small.copy(Bitmap.Config.RGB_565, false).also { if (it !== small) small.recycle() }
+}
+
+private fun loadWidgetCovers(context: Context, books: List<WidgetBook>, onLoaded: () -> Unit) {
+    val missing = books.filterNot { cachedCoverFile(context, it.uri).isFile }
+    if (missing.isEmpty()) return
+    Thread {
+        missing.forEach { runCatching { extractCover(context.applicationContext, it.uri, it.format)?.recycle() } }
+        Handler(Looper.getMainLooper()).post(onLoaded)
+    }.start()
 }
 
 private fun openBook(context: Context, requestCode: Int, uri: String, title: String, format: String): PendingIntent {
@@ -153,14 +244,14 @@ private fun openBook(context: Context, requestCode: Int, uri: String, title: Str
 
 private object CoverArtwork {
     private val colors = intArrayOf(0xFF677767.toInt(), 0xFFA96B54.toInt(), 0xFF6E7791.toInt(), 0xFFC19B59.toInt(), 0xFF9B767F.toInt())
-    private val cache = object : LruCache<String, Bitmap>(4 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
     }
 
     fun create(title: String, format: String, width: Int = 360, height: Int = 520): Bitmap {
         val key = "$title\u0000$format\u0000$width\u0000$height"
         cache.get(key)?.let { return it }
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         val index = (title.hashCode() and Int.MAX_VALUE) % colors.size
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
