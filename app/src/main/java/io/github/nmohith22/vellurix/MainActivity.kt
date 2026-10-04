@@ -292,15 +292,6 @@ private fun FolioApp(resumeTick: Int) {
             AnimatedVisibility(visible = searchOpen, enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(), exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()) {
                 OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).focusRequester(searchFocus), singleLine = true, placeholder = { Text("Search your library") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, trailingIcon = { IconButton(onClick = { search = ""; searchOpen = false }) { Icon(Icons.Rounded.Close, "Close search") } }, shape = RoundedCornerShape(18.dp))
             }
-            Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 18.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (folderUri == null) "Choose a folder before populating" else "New folder books are added when you open the library", style = MaterialTheme.typography.bodySmall, color = Muted)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (store.exclusions().isNotEmpty()) TextButton(onClick = { hiddenDialog = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Hidden ${store.exclusions().size}", style = MaterialTheme.typography.labelSmall) }
-                    TextButton(onClick = { populate() }, enabled = !scanning, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                        if (scanning) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("Populate")
-                    }
-                }
-            }
             if (selectedBooks.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${selectedBooks.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = appColors.third)
                 TextButton(onClick = { bulkShelfDialog = true }) { Text("Move to shelf") }
@@ -350,7 +341,7 @@ private fun FolioApp(resumeTick: Int) {
         }) { Text("Create") }
     }, dismissButton = { TextButton(onClick = { shelfDialog = false; shelfName = "" }) { Text("Cancel") } })
 
-    if (hiddenDialog) AlertDialog(onDismissRequest = { hiddenDialog = false }, title = { Text("Hidden from folder scans") }, text = { Text("${store.exclusions().size} removed book(s) will stay out of later scans until you clear this list.") }, confirmButton = { TextButton(onClick = { store.saveExclusions(emptySet()); hiddenDialog = false }) { Text("Clear hidden list") } }, dismissButton = { TextButton(onClick = { hiddenDialog = false }) { Text("Done") } })
+    if (hiddenDialog) AlertDialog(onDismissRequest = { hiddenDialog = false }, title = { Text("Clear removed-book exclusions?") }, text = { Text("Previously removed books can appear again the next time you populate the selected folder.") }, confirmButton = { TextButton(onClick = { store.saveExclusions(emptySet()); hiddenDialog = false }) { Text("Clear exclusions") } }, dismissButton = { TextButton(onClick = { hiddenDialog = false }) { Text("Cancel") } })
 
     if (settingsOpen) {
         AlertDialog(
@@ -358,6 +349,9 @@ private fun FolioApp(resumeTick: Int) {
             title = { Text("Settings") },
             text = {
                 Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Folder library", style = MaterialTheme.typography.titleSmall)
+                    TextButton(onClick = { populate() }, enabled = !scanning) { Text(if (scanning) "Scanning…" else "Populate from folder") }
+                    TextButton(onClick = { hiddenDialog = true }) { Text("Clear removed-book exclusions") }
                     Text("Library view", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = layoutMode == "cards", onClick = { layoutMode = "cards"; settings.edit().putString("layout", layoutMode).apply() }, label = { Text("Cards") })
