@@ -11,12 +11,12 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 ## Features
 
 - Read EPUB, PDF, TXT, HTML, FB2, and basic RTF files.
-- For EPUB and flowing text, set global reading defaults or per-book overrides for themes, text and page colors, fonts, and text size. Unset per-book settings inherit the global defaults, and each book can be reset to those defaults.
+- For EPUB and flowing text, set global reading defaults or per-book overrides for themes, text and page colors, fonts, and text size. Reader appearance and layout controls stay disabled until **Customize this book** is enabled; unset per-book settings inherit the global defaults.
 - The reader opens in a distraction-free view. Tap the center to reveal controls; tap either side to change pages. The compact toolbar provides themes, rotation, contents, and bookmarks; swipe from the left edge to open the book drawer.
 - Choose paper, white, sepia, night, forest, slate, or independently customize text and page colors. PDF documents retain their page colors.
 - Adjust text size, typeface, top/bottom margins, and EPUB layout. EPUB reading defaults to paginated single-column pages; double-column mode follows the live viewport and is available in landscape, while landscape single-column and continuous modes remain available. Appearance selections update immediately, and layout changes keep the current reading position.
 - Increase line spacing globally or for an individual book. EPUB line-height changes turn off publisher text styling so the selected spacing can take effect.
-- Choose no transition, fade, slide, or a page-sheet turning animation. Tap the reader's top-right corner to bookmark a page; saved pages show a high-contrast theme-colored marker while reading.
+- Choose no transition, fade, slide, or a page-sheet turning animation. Tap the reader's top-right corner to toggle a bookmark; its theme-colored ribbon drops in with a small bounce and slides away when removed.
 - Choose from 19 Monkeytype-inspired app themes adapted from the local `workout_app` palette.
 - Tap a book card or list row to read it. Choose card covers with or without titles; list rows always show both. Long-press to rename the in-app title, open live per-book reader settings, assign a shelf, select books for batch shelf moves, or remove a book.
 - Switch the library between card and list views, resize the items, and change the app theme from Settings.

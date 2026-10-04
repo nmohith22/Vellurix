@@ -239,12 +239,14 @@ class ReaderActivity : FragmentActivity() {
                         else parseSavedLocator(value)?.let { host?.navigateTo(it) }
                     },
                     onSeek = { (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.seekToProgression(it) },
-                    onBookmark = ::addBookmark,
+                    onBookmark = ::toggleBookmark,
                     onRemoveBookmark = ::removeBookmark,
                     onAppearance = ::saveAppearance,
                     onTheme = { id ->
-                        val colors = readerPreset(id)
-                        saveAppearance((appearance ?: loadGlobalReaderAppearanceForActivity()).copy(theme = id, background = colors.first, foreground = colors.second))
+                        if (customizeThisBook) {
+                            val colors = readerPreset(id)
+                            saveAppearance((appearance ?: loadGlobalReaderAppearanceForActivity()).copy(theme = id, background = colors.first, foreground = colors.second))
+                        }
                     },
                     onCustomizeBook = { enabled ->
                         customizeThisBook = enabled
@@ -261,11 +263,13 @@ class ReaderActivity : FragmentActivity() {
                     },
                     onTransition = { mode -> transition = mode; getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putString("page_transition", mode).apply() },
                     onReadingMode = { mode ->
-                        val current = appearance ?: loadReaderAppearance(this@ReaderActivity, uri.toString())
-                        saveScopedBoolean("two_columns", mode == "double")
-                        saveScopedBoolean("continuous", mode == "continuous")
-                        saveAppearance(current.copy(twoColumns = mode == "double", continuous = mode == "continuous"))
-                        twoColumns = mode == "double"
+                        if (customizeThisBook) {
+                            val current = appearance ?: loadReaderAppearance(this@ReaderActivity, uri.toString())
+                            saveScopedBoolean("two_columns", mode == "double")
+                            saveScopedBoolean("continuous", mode == "continuous")
+                            saveAppearance(current.copy(twoColumns = mode == "double", continuous = mode == "continuous"))
+                            twoColumns = mode == "double"
+                        }
                     },
                     ) }
                 }
@@ -333,6 +337,7 @@ class ReaderActivity : FragmentActivity() {
     }
 
     private fun saveAppearance(value: ReaderAppearance) {
+        if (!customizeThisBook) return
         val previous = appearance
         appearance = value
         val prefs = scopedAppearancePreferences()
@@ -377,14 +382,15 @@ class ReaderActivity : FragmentActivity() {
         getSharedPreferences("reader_bookmarks", MODE_PRIVATE).edit().putString(key, org.json.JSONArray().apply { values.forEach { put(org.json.JSONObject().put("title", it.title).put("locator", it.locator).put("page", it.page)) } }.toString()).apply()
     }
 
-    private fun addBookmark() {
+    private fun toggleBookmark() {
         val locator = (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.currentLocator() ?: return
         val json = locator.toJSON().toString()
         val host = supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment
-        if (bookmarks.none { it.locator == json }) saveBookmarks(bookmarks + ReaderBookmark(host?.chapterTitle(locator) ?: locator.title?.takeIf { it.isNotBlank() } ?: "Saved place", json, locator.locations.position))
+        val target = ReaderBookmark(host?.chapterTitle(locator) ?: locator.title?.takeIf { it.isNotBlank() } ?: "Saved place", json, locator.locations.position)
+        saveBookmarks(toggleReaderBookmark(bookmarks, target))
     }
 
-    internal fun bookmarkCurrentPage() = addBookmark()
+    internal fun bookmarkCurrentPage() = toggleBookmark()
     internal fun isReaderInputBlocked() = controlsVisible || drawerOpen || settingsOpen
     internal fun updateCurrentPageLocator(locatorJson: String) { currentPageLocatorJson = locatorJson }
 
@@ -417,7 +423,7 @@ class ReaderActivity : FragmentActivity() {
                 val width = nav.publicationView.width.toFloat().coerceAtLeast(1f)
                 val height = nav.publicationView.height.toFloat().coerceAtLeast(1f)
                 when (readerTapAction(event.point.x, event.point.y, width, height, isReaderInputBlocked())) {
-                    ReaderTapAction.ADD_BOOKMARK -> addBookmark()
+                    ReaderTapAction.ADD_BOOKMARK -> toggleBookmark()
                     ReaderTapAction.PREVIOUS_PAGE -> host.turnPage(false)
                     ReaderTapAction.NEXT_PAGE -> host.turnPage(true)
                     ReaderTapAction.TOGGLE_CONTROLS -> controlsVisible = true
