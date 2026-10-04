@@ -4,6 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReaderAppearanceCheck {
+    @Test fun deepReaderPresetsUsePureOledBlack() {
+        assertEquals(0xFF000000.toInt(), readerPreset("deep_orange").first)
+        assertEquals(0xFFC58B55.toInt(), readerPreset("deep_orange").second)
+    }
+
     @Test fun absentBookOverridesKeepGlobalAppearance() {
         val global = ReaderAppearance(theme = "sepia", background = 0xFFF4E8CF.toInt(), foreground = 0xFF473727.toInt(), fontFamily = "serif", fontScale = 1.2f)
         assertEquals(global, resolveReaderAppearance(global, null))

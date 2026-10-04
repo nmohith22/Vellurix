@@ -535,6 +535,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                             }
                             1 -> {
                                 Text("App theme", style = MaterialTheme.typography.titleSmall)
+                                Text("This palette styles the library and reader controls. Choose the reading-page palette below.", style = MaterialTheme.typography.bodySmall, color = Muted)
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
                                     items(appThemes.size) { index ->
                                         val theme = appThemes[index]
@@ -547,20 +548,16 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                                         }
                                     }
                                 }
-                                Text("Global reader theme", style = MaterialTheme.typography.titleSmall)
+                                Text("Global reader theme · used in the reader", style = MaterialTheme.typography.titleSmall)
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night").forEach { (key, label) ->
-                                        FilterChip(selected = readerTheme == key, onClick = {
-                                            readerTheme = key
-                                            val (background, foreground) = when (key) {
-                                                "white" -> android.graphics.Color.WHITE to android.graphics.Color.rgb(35,35,35)
-                                                "sepia" -> android.graphics.Color.rgb(244,232,207) to android.graphics.Color.rgb(71,55,39)
-                                                "night" -> android.graphics.Color.rgb(14,16,19) to android.graphics.Color.rgb(211,215,219)
-                                                else -> android.graphics.Color.rgb(250,249,246) to android.graphics.Color.rgb(43,42,39)
-                                            }
-                                            readerSettings.edit().putString("theme", key).putInt("background", background).putInt("foreground", foreground).apply()
-                                            settings.edit().putString("reader_theme", key).apply()
-                                        }, label = { Text(label) })
+                                    readerThemePresets.forEach { preset ->
+                                        Surface(onClick = {
+                                            readerTheme = preset.id
+                                            readerSettings.edit().putString("theme", preset.id).putInt("background", preset.background).putInt("foreground", preset.foreground).apply()
+                                            settings.edit().putString("reader_theme", preset.id).apply()
+                                        }, shape = RoundedCornerShape(14.dp), color = Color(preset.background), border = if (readerTheme == preset.id) androidx.compose.foundation.BorderStroke(2.dp, Color(palette.accent)) else androidx.compose.foundation.BorderStroke(1.dp, Color(palette.muted).copy(alpha = .35f))) {
+                                            Text(preset.name, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelMedium)
+                                        }
                                     }
                                 }
                                 TextButton(onClick = { colorDialog = true }) { Text("Custom text and background colors") }

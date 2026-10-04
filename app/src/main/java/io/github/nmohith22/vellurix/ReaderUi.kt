@@ -186,9 +186,8 @@ internal fun ReaderOverlay(
                             AnimatedVisibility(visible = !themeCarousel) { IconButton(modifier = Modifier.size(40.dp), enabled = customizeBook, onClick = { themeCarousel = true }) { Icon(Icons.Rounded.ColorLens, "Theme", tint = fg.copy(alpha = if (customizeBook) 1f else .38f)) } }
                             AnimatedVisibility(visible = themeCarousel && customizeBook, modifier = Modifier.weight(1f)) {
                                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
-                                    listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) ->
-                                        val pair = readerPreset(id)
-                                        Surface(onClick = { onTheme(id); themeCarousel = false }, color = Color(pair.first), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(label, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(pair.second), style = MaterialTheme.typography.labelSmall) }
+                                    readerThemePresets.forEach { preset ->
+                                        Surface(onClick = { onTheme(preset.id); themeCarousel = false }, color = Color(preset.background), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(preset.name, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelSmall) }
                                     }
                                 }
                             }
@@ -207,14 +206,14 @@ internal fun ReaderOverlay(
             enter = slideInVertically(spring(dampingRatio = .5f, stiffness = 620f)) { -it } +
                 scaleIn(spring(dampingRatio = .55f, stiffness = 680f), initialScale = .88f) + fadeIn(androidx.compose.animation.core.tween(90)),
             exit = slideOutVertically(androidx.compose.animation.core.tween(190)) { -it } + fadeOut(androidx.compose.animation.core.tween(140)),
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 82.dp, end = 20.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 0.dp, end = 6.dp),
         ) {
             Surface(
-                modifier = Modifier.size(width = 42.dp, height = 54.dp),
+                modifier = Modifier.size(width = 20.dp, height = 32.dp),
                 shape = BookmarkRibbonShape,
                 color = bookmarkTint,
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, if (bg.luminance() > .5f) Color(0xFF4A3428) else Color(0xFFF2E7D2)),
-                shadowElevation = 8.dp,
+                border = androidx.compose.foundation.BorderStroke(.75.dp, if (bg.luminance() > .5f) Color(0xFF4A3428) else Color(0xFFF2E7D2)),
+                shadowElevation = 3.dp,
             ) { }
         }
 
@@ -291,7 +290,7 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                             0 -> {
                                 Surface(shape = RoundedCornerShape(16.dp), color = Color(appearance.background), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("LIVE PREVIEW", color = Color(appearance.foreground).copy(alpha = .65f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp); Text("A chapter begins here", color = Color(appearance.foreground), fontSize = (16 * appearance.fontScale).sp, lineHeight = (20 * appearance.fontScale * appearance.lineSpacing).sp, fontWeight = FontWeight.SemiBold); Text("Your colors, typeface, spacing and text size update as you change them.", color = Color(appearance.foreground).copy(alpha = .82f), fontSize = (13 * appearance.fontScale).sp, lineHeight = (18 * appearance.fontScale * appearance.lineSpacing).sp, maxLines = 2) } }
                                 Text("Reading theme", style = MaterialTheme.typography.titleSmall)
-                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("paper" to "Paper", "white" to "White", "sepia" to "Sepia", "night" to "Night", "forest" to "Forest", "slate" to "Slate").forEach { (id, label) -> val colors = readerPreset(id); Surface(onClick = { appearance = appearance.copy(theme = id, background = colors.first, foreground = colors.second); onAppearance(appearance) }, enabled = customizeBook, shape = RoundedCornerShape(14.dp), color = Color(colors.first), border = if (appearance.theme == id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.alpha(if (customizeBook) 1f else .48f)) { Text(label, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(colors.second), style = MaterialTheme.typography.labelMedium) } } }
+                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { readerThemePresets.forEach { preset -> Surface(onClick = { appearance = appearance.copy(theme = preset.id, background = preset.background, foreground = preset.foreground); onAppearance(appearance) }, enabled = customizeBook, shape = RoundedCornerShape(14.dp), color = Color(preset.background), border = if (appearance.theme == preset.id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.alpha(if (customizeBook) 1f else .48f)) { Text(preset.name, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelMedium) } } }
                                 Text("Text size · ${(appearance.fontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
                                 Slider(value = appearance.fontScale, onValueChange = { appearance = appearance.copy(fontScale = it); onAppearance(appearance) }, valueRange = .8f..2f, enabled = customizeBook)
                                 Text("Line spacing · ${(appearance.lineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
@@ -300,6 +299,7 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                                 Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Typeface", style = MaterialTheme.typography.titleSmall); Text(fonts.firstOrNull { it.first == appearance.fontFamily }?.second ?: "Publisher default", style = MaterialTheme.typography.bodySmall) }; Box { TextButton(onClick = { fontMenu = true }, enabled = customizeBook) { Text("Change") }; DropdownMenu(expanded = fontMenu && customizeBook, onDismissRequest = { fontMenu = false }) { fonts.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, enabled = customizeBook, onClick = { appearance = appearance.copy(fontFamily = value); onAppearance(appearance); fontMenu = false }) } } } }
                                 Text("Colors", style = MaterialTheme.typography.titleSmall)
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = colorTarget == "background", onClick = { colorTarget = "background" }, enabled = customizeBook, label = { Text("Page") }); FilterChip(selected = colorTarget == "foreground", onClick = { colorTarget = "foreground" }, enabled = customizeBook, label = { Text("Text") }); Box(Modifier.size(30.dp).clip(CircleShape).background(Color(if (colorTarget == "background") appearance.background else appearance.foreground))) }
+                                if (colorTarget == "background") Text("Tap the wheel center for OLED black (#000000).", style = MaterialTheme.typography.bodySmall)
                                 ReaderColorWheel(Modifier.fillMaxWidth().height(180.dp).alpha(if (customizeBook) 1f else .42f), enabled = customizeBook) { color -> appearance = if (colorTarget == "background") appearance.copy(theme = "custom", background = color) else appearance.copy(theme = "custom", foreground = color); onAppearance(appearance) }
                                 if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
                             }
@@ -417,27 +417,25 @@ private fun ReaderColorWheel(modifier: Modifier, enabled: Boolean, onColor: (Int
     }) {
         val radius = kotlin.math.min(size.width, size.height) / 2f
         drawCircle(Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)), radius)
-        drawCircle(Color.White.copy(alpha = .8f), radius * .14f)
+        drawCircle(Color.Black, radius * .14f)
+        drawCircle(Color.White, radius * .14f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
     }
 }
 
 private fun emitWheelColor(x: Float, y: Float, width: Float, height: Float, onColor: (Int) -> Unit) {
     val dx = x - width / 2f; val dy = y - height / 2f
     val radius = kotlin.math.sqrt(dx * dx + dy * dy); val maxRadius = kotlin.math.min(width, height) / 2f
-    if (radius <= maxRadius) {
+    if (radius <= maxRadius * .14f) {
+        onColor(android.graphics.Color.BLACK)
+    } else if (radius <= maxRadius) {
         val hue = ((Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble())).toFloat() + 360f) % 360f)
         onColor(android.graphics.Color.HSVToColor(floatArrayOf(hue, (radius / maxRadius).coerceIn(.12f, 1f), 1f)))
     }
 }
 
-internal fun readerPreset(id: String): Pair<Int, Int> = when (id) {
-    "white" -> android.graphics.Color.WHITE to android.graphics.Color.rgb(35, 35, 35)
-    "sepia" -> android.graphics.Color.rgb(244, 232, 207) to android.graphics.Color.rgb(71, 55, 39)
-    "night" -> android.graphics.Color.rgb(14, 16, 19) to android.graphics.Color.rgb(211, 215, 219)
-    "forest" -> android.graphics.Color.rgb(22, 35, 27) to android.graphics.Color.rgb(218, 229, 218)
-    "slate" -> android.graphics.Color.rgb(30, 38, 49) to android.graphics.Color.rgb(220, 226, 235)
-    else -> android.graphics.Color.rgb(250, 249, 246) to android.graphics.Color.rgb(43, 42, 39)
-}
+internal fun readerPreset(id: String): Pair<Int, Int> = readerThemePresets.firstOrNull { it.id == id }
+    ?.let { it.background to it.foreground }
+    ?: readerThemePresets.first { it.id == "paper" }.let { it.background to it.foreground }
 
 internal fun bookmarkRibbonTint(background: Int): Color =
     if (Color(background).luminance() < .4f) Color(0xFFFFC45E) else Color(0xFF945033)

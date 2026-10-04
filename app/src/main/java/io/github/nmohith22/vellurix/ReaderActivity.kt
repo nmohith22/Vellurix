@@ -85,7 +85,7 @@ internal enum class ReaderTapAction { IGNORE, ADD_BOOKMARK, PREVIOUS_PAGE, NEXT_
 internal fun readerTapAction(x: Float, y: Float, width: Float, height: Float, inputBlocked: Boolean): ReaderTapAction {
     if (inputBlocked || width <= 0f || height <= 0f) return ReaderTapAction.IGNORE
     return when {
-        x >= width * .88f && y <= height * .12f -> ReaderTapAction.ADD_BOOKMARK
+        x >= width * .88f && y <= height * .10f -> ReaderTapAction.ADD_BOOKMARK
         x < width * .30f -> ReaderTapAction.PREVIOUS_PAGE
         x > width * .70f -> ReaderTapAction.NEXT_PAGE
         else -> ReaderTapAction.TOGGLE_CONTROLS
