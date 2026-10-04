@@ -122,6 +122,7 @@ private fun FolioApp(resumeTick: Int) {
     val readerSettings = remember { context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE) }
     var layoutMode by rememberSaveable { mutableStateOf(settings.getString("layout", "cards") ?: "cards") }
     var cardSize by rememberSaveable { mutableFloatStateOf(settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)) }
+    var coverOnlyCards by rememberSaveable { mutableStateOf(settings.getBoolean("cover_only_cards", false)) }
     var appTheme by rememberSaveable { mutableStateOf(settings.getString("app_theme", "paper") ?: "paper") }
     var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
     var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
@@ -137,6 +138,7 @@ private fun FolioApp(resumeTick: Int) {
         if (resumeTick > 0) {
             layoutMode = settings.getString("layout", "cards") ?: "cards"
             cardSize = settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)
+            coverOnlyCards = settings.getBoolean("cover_only_cards", false)
             appTheme = settings.getString("app_theme", "paper") ?: "paper"
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
             readerFont = readerSettings.getString("font_family", "") ?: ""
@@ -289,7 +291,7 @@ private fun FolioApp(resumeTick: Int) {
             } else {
                 if (layoutMode == "cards") {
                     LazyVerticalGrid(columns = GridCells.Adaptive(minSize = (154 * cardSize).dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, onClick = { openBook(book) }, onLongClick = { selectedBook = book }) }
+                        items(visibleBooks, key = { it.uri }) { book -> BookCard(book, cardSize, appColors.third, showTitle = !coverOnlyCards, onClick = { openBook(book) }, onLongClick = { selectedBook = book }) }
                     }
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -326,6 +328,13 @@ private fun FolioApp(resumeTick: Int) {
                     }
                     Text(if (layoutMode == "cards") "Card size" else "List size", style = MaterialTheme.typography.titleSmall)
                     Slider(value = cardSize, onValueChange = { cardSize = it }, valueRange = .75f..1.35f, onValueChangeFinished = { settings.edit().putFloat("card_size", cardSize).apply() })
+                    if (layoutMode == "cards") {
+                        Text("Card labels", style = MaterialTheme.typography.titleSmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = !coverOnlyCards, onClick = { coverOnlyCards = false; settings.edit().putBoolean("cover_only_cards", false).apply() }, label = { Text("Cover + title") })
+                            FilterChip(selected = coverOnlyCards, onClick = { coverOnlyCards = true; settings.edit().putBoolean("cover_only_cards", true).apply() }, label = { Text("Cover only") })
+                        }
+                    }
                     Text("App theme", style = MaterialTheme.typography.titleSmall)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
                         items(appThemes.size) { index ->
@@ -527,7 +536,7 @@ private fun migrateBookState(context: android.content.Context, fromUri: String, 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookCard(book: BookItem, size: Float, textColor: Color, showTitle: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(colors.first) }
     val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
@@ -535,14 +544,9 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () 
         Column(Modifier.padding((10 * size).dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second)))) {
                 BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) })
-                Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.82f)))).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(book.title, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                    Text(book.format, color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.4.sp)
-                }
             }
-            Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
-            FilledTonalButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Open book") }
+            if (showTitle) Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (showTitle) Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
         }
     }
 }
@@ -560,7 +564,6 @@ private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -
                 Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            IconButton(onClick = onClick) { Icon(Icons.Rounded.AutoStories, "Open ${book.title}", tint = Accent) }
         }
     }
 }

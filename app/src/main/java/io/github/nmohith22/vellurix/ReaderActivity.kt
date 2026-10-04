@@ -84,7 +84,7 @@ private class PassThroughComposeContainer(context: android.content.Context, priv
 
 class ReaderActivity : FragmentActivity() {
     private var containerId = View.NO_ID
-    private var autoRotate = true
+    private var autoRotate by mutableStateOf(true)
     private var controlsVisible by mutableStateOf(false)
     private var drawerOpen by mutableStateOf(false)
     private var settingsOpen by mutableStateOf(false)
@@ -126,6 +126,7 @@ class ReaderActivity : FragmentActivity() {
                     autoRotate = autoRotate,
                     transition = transition,
                     twoColumns = twoColumns,
+                    supportsTwoColumns = intent.getStringExtra(EXTRA_FORMAT) == "EPUB",
                     toc = toc,
                     bookmarks = bookmarks,
                     onDrawerOpenChange = { drawerOpen = it },
@@ -146,6 +147,10 @@ class ReaderActivity : FragmentActivity() {
                     onBookmark = ::addBookmark,
                     onRemoveBookmark = ::removeBookmark,
                     onAppearance = ::saveAppearance,
+                    onTheme = { id ->
+                        val colors = readerPreset(id)
+                        saveAppearance((appearance ?: loadGlobalReaderAppearanceForActivity()).copy(theme = id, background = colors.first, foreground = colors.second))
+                    },
                     onCustomizeBook = { enabled ->
                         customizeThisBook = enabled
                         getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putBoolean("customize_this_book", enabled).apply()
@@ -216,20 +221,25 @@ class ReaderActivity : FragmentActivity() {
         val data = getSharedPreferences("reader_bookmarks", MODE_PRIVATE).getString(key, "[]")
         bookmarks = runCatching {
             val array = org.json.JSONArray(data)
-            (0 until array.length()).map { array.getJSONObject(it).let { item -> ReaderBookmark(item.getString("title"), item.getString("locator")) } }
+            (0 until array.length()).map { array.getJSONObject(it).let { item ->
+                val locator = item.getString("locator")
+                val saved = parseSavedLocator(locator)
+                ReaderBookmark(item.getString("title"), locator, item.optInt("page").takeIf { item.has("page") && it > 0 } ?: saved?.locations?.position)
+            } }
         }.getOrDefault(emptyList())
     }
 
     private fun saveBookmarks(values: List<ReaderBookmark>) {
         bookmarks = values
         val key = "bookmarks:${intent.getStringExtra(EXTRA_URI).orEmpty()}"
-        getSharedPreferences("reader_bookmarks", MODE_PRIVATE).edit().putString(key, org.json.JSONArray().apply { values.forEach { put(org.json.JSONObject().put("title", it.title).put("locator", it.locator)) } }.toString()).apply()
+        getSharedPreferences("reader_bookmarks", MODE_PRIVATE).edit().putString(key, org.json.JSONArray().apply { values.forEach { put(org.json.JSONObject().put("title", it.title).put("locator", it.locator).put("page", it.page)) } }.toString()).apply()
     }
 
     private fun addBookmark() {
         val locator = (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.currentLocator() ?: return
         val json = locator.toJSON().toString()
-        if (bookmarks.none { it.locator == json }) saveBookmarks(bookmarks + ReaderBookmark(locator.title ?: "Saved place", json))
+        val host = supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment
+        if (bookmarks.none { it.locator == json }) saveBookmarks(bookmarks + ReaderBookmark(host?.chapterTitle(locator) ?: locator.title?.takeIf { it.isNotBlank() } ?: "Saved place", json, locator.locations.position))
     }
 
     private fun removeBookmark(bookmark: ReaderBookmark) = saveBookmarks(bookmarks.filterNot { it.locator == bookmark.locator })
@@ -291,14 +301,28 @@ class ReaderHostFragment : Fragment() {
     private var tocDepths: List<Int> = emptyList()
     private var touchDownX = 0f
     private var touchDownY = 0f
+    private var flowingText: TextView? = null
+    private var flowingScroll: ScrollView? = null
+    private var publication: org.readium.r2.shared.publication.Publication? = null
+    private var locatorSaveJob: Job? = null
+    private var configuredColumns: Boolean? = null
 
     fun applyAppearance() {
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
-        (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(appearance))
         when (arguments?.getString(ARG_FORMAT).orEmpty()) {
             "TXT", "HTML", "HTM", "FB2", "RTF" -> {
-                (view as? FrameLayout)?.removeAllViews()
-                onViewCreated(view ?: return, null)
+                flowingScroll?.setBackgroundColor(appearance.background)
+                flowingText?.apply {
+                    setTextColor(appearance.foreground)
+                    textSize = 18f * appearance.fontScale
+                    typeface = appearance.fontFamily.takeIf { it.isNotBlank() }?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.DEFAULT
+                }
+            }
+            "EPUB" -> {
+                val desiredColumns = appearance.twoColumns
+                if (publication != null && configuredColumns != null && configuredColumns != desiredColumns) installPublication(publication!!, currentLocator())
+                else (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(readingPreferences(appearance))
+                configuredColumns = desiredColumns
             }
             "PDF" -> childFragmentManager.findFragmentByTag("publication_reader")?.view?.let { page ->
                 page.pivotX = page.width / 2f
@@ -357,6 +381,15 @@ class ReaderHostFragment : Fragment() {
     fun currentLocator(): org.readium.r2.shared.publication.Locator? =
         (childFragmentManager.findFragmentByTag("publication_reader") as? Navigator)?.currentLocator?.value
 
+    fun chapterTitle(locator: org.readium.r2.shared.publication.Locator): String? {
+        val href = locator.href.toString().substringBefore('#').substringBefore('?')
+        return tocLinks.indices.reversed().firstNotNullOfOrNull { index ->
+            val item = tocLinks[index]
+            val target = item.href.toString().substringBefore('#').substringBefore('?')
+            item.title?.takeIf { target == href || target.endsWith(href) || href.endsWith(target) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         if (savedInstanceState != null) {
             val format = arguments?.getString(ARG_FORMAT).orEmpty()
@@ -410,22 +443,33 @@ class ReaderHostFragment : Fragment() {
                 val flattenedToc = publication.tableOfContents.flatMap { flattenToc(it, 0) }
                 tocLinks = flattenedToc.map { it.first }
                 tocDepths = flattenedToc.map { it.second }
+                this@ReaderHostFragment.publication = publication
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
-                val factory = if (format == "PDF") PdfNavigatorFactory(publication, PdfiumEngineProvider()).createFragmentFactory(initialLocator = initialLocator)
-                else EpubNavigatorFactory(publication).createFragmentFactory(initialLocator = initialLocator, initialPreferences = readingPreferences(loadReaderAppearance(context, uri.toString())))
-                childFragmentManager.fragmentFactory = factory
+                if (format == "EPUB") configuredColumns = loadReaderAppearance(context, uri.toString()).twoColumns
                 clearLoading()
-                childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
-                val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? Navigator
-                val visualNavigator = childFragmentManager.findFragmentByTag("publication_reader") as? VisualNavigator
-                if (visualNavigator != null) {
-                    (activity as? ReaderActivity)?.onNavigatorReady(this@ReaderHostFragment, visualNavigator, tocLinks, tocDepths)
-                }
-                if (navigator != null) navigator.currentLocator.collect { locator -> progress.edit().putString(uri.toString(), locator.toJSON().toString()).apply() }
+                installPublication(publication, initialLocator)
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 if (isAdded) showError(error.message ?: "This file could not be opened.")
+            }
+        }
+    }
+
+    private fun installPublication(value: org.readium.r2.shared.publication.Publication, locator: org.readium.r2.shared.publication.Locator?) {
+        val format = arguments?.getString(ARG_FORMAT).orEmpty()
+        val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
+        else EpubNavigatorFactory(value).createFragmentFactory(initialLocator = locator, initialPreferences = readingPreferences(appearance))
+        childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
+        val fragment = childFragmentManager.findFragmentByTag("publication_reader")
+        (fragment as? VisualNavigator)?.let { (activity as? ReaderActivity)?.onNavigatorReady(this, it, tocLinks, tocDepths) }
+        locatorSaveJob?.cancel()
+        val progress = requireContext().getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
+        val key = arguments?.getString(ARG_URI).orEmpty()
+        (fragment as? Navigator)?.let { navigator ->
+            locatorSaveJob = viewLifecycleOwner.lifecycleScope.launch {
+                navigator.currentLocator.collect { current -> progress.edit().putString(key, current.toJSON().toString()).apply() }
             }
         }
     }
@@ -468,6 +512,7 @@ class ReaderHostFragment : Fragment() {
             setLineSpacing(8f, 1f)
             setPadding(26, 24, 26, 36)
         }
+        flowingText = content
         val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
         pendingScrollY = progress.getInt(key, 0)
         val scroll = ScrollView(context).apply {
@@ -497,11 +542,15 @@ class ReaderHostFragment : Fragment() {
             }
             post { scrollTo(0, pendingScrollY) }
         }
+        flowingScroll = scroll
         (view as? FrameLayout)?.addView(scroll, FrameLayout.LayoutParams(-1, -1))
     }
 
     override fun onDestroyView() {
         scrollSaveJob?.cancel()
+        locatorSaveJob?.cancel()
+        flowingText = null
+        flowingScroll = null
         if (arguments?.getString(ARG_FORMAT).orEmpty() in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) arguments?.getString(ARG_URI)?.let { key ->
             requireContext().getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 .edit().putInt(key, pendingScrollY).apply()
