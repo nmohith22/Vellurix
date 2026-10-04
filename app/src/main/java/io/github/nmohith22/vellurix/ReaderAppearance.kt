@@ -8,8 +8,8 @@ internal data class ReaderAppearance(
     val fontScale: Float = 1f,
     val twoColumns: Boolean = false,
     val continuous: Boolean = false,
-    val topMarginDp: Float = 24f,
-    val bottomMarginDp: Float = 24f,
+    val topMarginDp: Float = 0f,
+    val bottomMarginDp: Float = 0f,
 )
 
 internal data class ReaderAppearanceOverrides(
@@ -38,3 +38,6 @@ internal fun resolveReaderAppearance(
     topMarginDp = book?.topMarginDp ?: global.topMarginDp,
     bottomMarginDp = book?.bottomMarginDp ?: global.bottomMarginDp,
 )
+
+internal fun usesTwoColumns(preferred: Boolean, continuous: Boolean, widthPx: Int, heightPx: Int): Boolean =
+    preferred && !continuous && widthPx > heightPx

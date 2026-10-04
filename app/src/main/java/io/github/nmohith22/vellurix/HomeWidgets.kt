@@ -201,3 +201,17 @@ fun refreshHomeWidgets(context: Context) {
     manager.getAppWidgetIds(ComponentName(context, ShelfWidgetProvider::class.java)).forEach { ShelfWidgetProvider.render(context, manager, it) }
 }
 
+fun renameShelfWidgetSelections(context: Context, oldName: String, newName: String) {
+    val manager = AppWidgetManager.getInstance(context)
+    val prefs = context.getSharedPreferences("folio_widgets", Context.MODE_PRIVATE)
+    val editor = prefs.edit()
+    var changed = false
+    manager.getAppWidgetIds(ComponentName(context, ShelfWidgetProvider::class.java)).forEach { id ->
+        if (prefs.getString("shelf_$id", "All books") == oldName) {
+            editor.putString("shelf_$id", newName)
+            changed = true
+        }
+    }
+    if (changed) editor.apply()
+}
+

@@ -1,11 +1,18 @@
 package io.github.nmohith22.vellurix
 
+import android.animation.ValueAnimator
+import android.content.res.Configuration
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.Camera
 import android.graphics.Color as AndroidColor
+import android.graphics.Matrix
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.MotionEvent
 import android.os.Build
 import android.view.WindowInsets
@@ -82,6 +89,36 @@ private class PassThroughComposeContainer(context: android.content.Context, priv
     }
 }
 
+private class PageTurnOverlay(context: android.content.Context, private val page: Bitmap, private val forward: Boolean) : View(context) {
+    var progress = 0f
+        set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+    private val camera = Camera()
+    private val matrix = Matrix()
+    private val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val shadePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val hinge = if (forward) 0f else width.toFloat()
+        camera.save()
+        camera.rotateY((if (forward) -90f else 90f) * progress)
+        camera.getMatrix(matrix)
+        camera.restore()
+        matrix.preTranslate(-hinge, -height / 2f)
+        matrix.postTranslate(hinge, height / 2f)
+        canvas.save()
+        canvas.concat(matrix)
+        canvas.drawBitmap(page, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), pagePaint)
+        shadePaint.shader = null
+        shadePaint.color = android.graphics.Color.BLACK
+        shadePaint.alpha = (42f * kotlin.math.sin(progress * Math.PI)).toInt().coerceIn(0, 42)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
+        canvas.restore()
+    }
+
+    fun release() { if (!page.isRecycled) page.recycle() }
+}
+
 class ReaderActivity : FragmentActivity() {
     private var containerId = View.NO_ID
     private var autoRotate by mutableStateOf(true)
@@ -94,6 +131,7 @@ class ReaderActivity : FragmentActivity() {
     private var customizeThisBook by mutableStateOf(false)
     private var twoColumns by mutableStateOf(false)
     private var transition by mutableStateOf("page turn")
+    private var readerRoot: FrameLayout? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -103,6 +141,7 @@ class ReaderActivity : FragmentActivity() {
         autoRotate = getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).getBoolean("auto_rotate", true)
         containerId = READER_CONTAINER_ID
         val root = FrameLayout(this).apply { setBackgroundColor(AndroidColor.rgb(250, 249, 246)) }
+        readerRoot = root
 
         root.addView(FrameLayout(this).apply { id = containerId }, FrameLayout.LayoutParams(-1, -1))
         val overlay = PassThroughComposeContainer(this) { event ->
@@ -183,6 +222,11 @@ class ReaderActivity : FragmentActivity() {
         overlay.addView(composeOverlay, FrameLayout.LayoutParams(-1, -1))
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
+        root.addOnLayoutChangeListener { view, _, _, _, _, oldLeft, oldTop, oldRight, oldBottom ->
+            if (view.width != oldRight - oldLeft || view.height != oldBottom - oldTop) {
+                (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.onReaderViewportChanged(view.width, view.height)
+            }
+        }
         root.requestApplyInsets()
         enterImmersiveReader()
         val bookSettingsShortcut = intent.getBooleanExtra(EXTRA_BOOK_SETTINGS, false)
@@ -201,7 +245,18 @@ class ReaderActivity : FragmentActivity() {
 
     override fun onDestroy() {
         if (isFinishing) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        readerRoot = null
         super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enterImmersiveReader()
+        readerRoot?.post {
+            readerRoot?.let { root ->
+                (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.onReaderViewportChanged(root.width, root.height)
+            }
+        }
     }
 
     private fun applyRotation() { requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
@@ -216,8 +271,8 @@ class ReaderActivity : FragmentActivity() {
             fontScale = prefs.getFloat("font_scale", 1f),
             twoColumns = prefs.getBoolean("two_columns", false),
             continuous = prefs.getBoolean("continuous", false),
-            topMarginDp = prefs.getFloat("top_margin_dp", 24f),
-            bottomMarginDp = prefs.getFloat("bottom_margin_dp", 24f),
+        topMarginDp = prefs.getFloat("top_margin_dp", 0f),
+        bottomMarginDp = prefs.getFloat("bottom_margin_dp", 0f),
         )
     }
 
@@ -337,6 +392,11 @@ class ReaderHostFragment : Fragment() {
     private var locatorSaveJob: Job? = null
     private var configuredMode: String? = null
     private var submittedPreferences: EpubPreferences? = null
+    private var viewportWidthPx = 0
+    private var viewportHeightPx = 0
+    private var pageTurnAnimator: ValueAnimator? = null
+    private var pageTurnOverlay: PageTurnOverlay? = null
+    private var turningPage = false
 
     fun applyAppearance() {
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
@@ -355,10 +415,10 @@ class ReaderHostFragment : Fragment() {
                 }
             }
             "EPUB" -> {
-                val desiredMode = readerMode(appearance)
+                val desiredMode = readerMode(appearance, viewportWidthPx, viewportHeightPx)
                 if (publication != null && configuredMode != null && configuredMode != desiredMode) installPublication(publication!!, currentLocator())
                 else {
-                    val preferences = readingPreferences(appearance)
+                    val preferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx)
                     if (preferences != submittedPreferences) {
                         (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(preferences)
                         submittedPreferences = preferences
@@ -376,39 +436,99 @@ class ReaderHostFragment : Fragment() {
     }
 
     fun turnPage(forward: Boolean) {
+        if (turningPage) return
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
         val prefs = requireContext().getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
         val mode = prefs.getString("page_transition", "page turn") ?: "page turn"
         val navView = (childFragmentManager.findFragmentByTag("publication_reader") as? Fragment)?.view ?: view
         val scroll = (view as? FrameLayout)?.getChildAt(0) as? ScrollView
         val isText = format in setOf("TXT", "HTML", "HTM", "FB2", "RTF")
-        val go: () -> Unit = {
+        val go: (Boolean) -> Unit = { animated ->
             if (isText) {
                 scroll?.let {
                     val distance = (it.height * .82f).toInt() * if (forward) 1 else -1
-                    if (mode == "page turn") it.smoothScrollBy(0, distance) else it.scrollBy(0, distance)
+                    if (animated) it.smoothScrollBy(0, distance) else it.scrollBy(0, distance)
                 }
             } else if (format == "PDF") {
-                (childFragmentManager.findFragmentByTag("publication_reader") as? PdfNavigatorFragment<*, *>)?.let { if (forward) it.goForward(mode == "page turn") else it.goBackward(mode == "page turn") }
+                (childFragmentManager.findFragmentByTag("publication_reader") as? PdfNavigatorFragment<*, *>)?.let { if (forward) it.goForward(animated) else it.goBackward(animated) }
             } else {
-                (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.let { if (forward) it.goForward(mode == "page turn") else it.goBackward(mode == "page turn") }
+                (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.let { if (forward) it.goForward(animated) else it.goBackward(animated) }
             }
         }
         when (mode) {
             "fade" -> navView?.let { target ->
                 target.animate().cancel()
-                target.animate().alpha(.12f).setDuration(100).withEndAction { go(); target.animate().alpha(1f).setDuration(160).start() }.start()
-            } ?: go()
+                target.animate().alpha(.12f).setDuration(100).withEndAction { go(false); target.animate().alpha(1f).setDuration(160).start() }.start()
+            } ?: go(false)
             "slide" -> {
                 val target = navView
-                if (target == null || target.width == 0) go() else {
+                if (target == null || target.width == 0) go(false) else {
                     target.animate().cancel()
                     val distance = target.width * .16f * if (forward) -1 else 1
-                    target.animate().translationX(distance).alpha(.65f).setDuration(110).withEndAction { go(); target.translationX = -distance; target.animate().translationX(0f).alpha(1f).setDuration(160).start() }.start()
+                    target.animate().translationX(distance).alpha(.65f).setDuration(110).withEndAction { go(false); target.translationX = -distance; target.animate().translationX(0f).alpha(1f).setDuration(160).start() }.start()
                 }
             }
-            else -> go()
+            "page turn" -> if (navView == null || !animatePageTurn(navView, forward) { go(false) }) go(true)
+            else -> go(false)
         }
+    }
+
+    private fun animatePageTurn(target: View, forward: Boolean, turn: () -> Unit): Boolean {
+        if (turningPage || target.width <= 0 || target.height <= 0) return false
+        val parent = target.parent as? ViewGroup ?: return false
+        val snapshot = try {
+            Bitmap.createBitmap(target.width, target.height, Bitmap.Config.RGB_565).also { bitmap -> target.draw(Canvas(bitmap)) }
+        } catch (_: OutOfMemoryError) {
+            return false
+        } catch (_: RuntimeException) {
+            return false
+        }
+        val overlay = PageTurnOverlay(requireContext(), snapshot, forward)
+        val params = ViewGroup.MarginLayoutParams(target.width, target.height).apply {
+            leftMargin = target.left
+            topMargin = target.top
+        }
+        parent.addView(overlay, params)
+        target.alpha = 0f
+        turningPage = true
+        pageTurnOverlay = overlay
+        var turned = false
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 430L
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val fraction = it.animatedValue as Float
+                overlay.progress = fraction
+                if (!turned && fraction >= .48f) { turned = true; turn() }
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) = finishPageTurn(target, overlay)
+                override fun onAnimationCancel(animation: android.animation.Animator) = finishPageTurn(target, overlay)
+            })
+        }
+        pageTurnAnimator = animator
+        animator.start()
+        return true
+    }
+
+    private fun finishPageTurn(target: View, overlay: PageTurnOverlay) {
+        target.alpha = 1f
+        (overlay.parent as? ViewGroup)?.removeView(overlay)
+        overlay.release()
+        if (pageTurnOverlay === overlay) pageTurnOverlay = null
+        pageTurnAnimator = null
+        turningPage = false
+    }
+
+    fun onReaderViewportChanged(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val wasLandscape = viewportWidthPx > viewportHeightPx
+        if (width == viewportWidthPx && height == viewportHeightPx) return
+        viewportWidthPx = width
+        viewportHeightPx = height
+        val landscape = width > height
+        if (landscape == wasLandscape) return
+        if (arguments?.getString(ARG_FORMAT) == "EPUB" && publication != null) applyAppearance()
     }
 
     fun navigateToToc(index: Int) {
@@ -496,7 +616,7 @@ class ReaderHostFragment : Fragment() {
                 this@ReaderHostFragment.publication = publication
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
-                if (format == "EPUB") configuredMode = readerMode(loadReaderAppearance(context, uri.toString()))
+                if (format == "EPUB") configuredMode = readerMode(loadReaderAppearance(context, uri.toString()), viewportWidthPx, viewportHeightPx)
                 clearLoading()
                 installPublication(publication, initialLocator)
             }.onFailure { error ->
@@ -507,6 +627,7 @@ class ReaderHostFragment : Fragment() {
     }
 
     private fun installPublication(value: org.readium.r2.shared.publication.Publication, locator: org.readium.r2.shared.publication.Locator?) {
+        pageTurnAnimator?.cancel()
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
         (view as? FrameLayout)?.let { host ->
@@ -515,8 +636,12 @@ class ReaderHostFragment : Fragment() {
             host.clipToPadding = false
         }
         childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
-        else EpubNavigatorFactory(value).createFragmentFactory(initialLocator = locator, initialPreferences = readingPreferences(appearance))
-        submittedPreferences = if (format == "EPUB") readingPreferences(appearance) else null
+        else EpubNavigatorFactory(value).createFragmentFactory(
+            initialLocator = locator,
+            initialPreferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx),
+            configuration = epubColumnConfiguration(appearance, viewportWidthPx, viewportHeightPx),
+        )
+        submittedPreferences = if (format == "EPUB") readingPreferences(appearance, viewportWidthPx, viewportHeightPx) else null
         childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
         val fragment = childFragmentManager.findFragmentByTag("publication_reader")
         (fragment as? VisualNavigator)?.let { (activity as? ReaderActivity)?.onNavigatorReady(this, it, tocLinks, tocDepths) }
@@ -541,7 +666,7 @@ class ReaderHostFragment : Fragment() {
 
     private fun showLoading() {
         val label = TextView(requireContext()).apply {
-            text = "Opening book…"
+            text = "Opening bookâ€¦"
             textSize = 16f
             gravity = Gravity.CENTER
             setTextColor(AndroidColor.rgb(73, 62, 55))
@@ -603,6 +728,11 @@ class ReaderHostFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        pageTurnAnimator?.cancel()
+        pageTurnOverlay?.let { overlay -> (overlay.parent as? ViewGroup)?.removeView(overlay); overlay.release() }
+        pageTurnOverlay = null
+        pageTurnAnimator = null
+        turningPage = false
         scrollSaveJob?.cancel()
         locatorSaveJob?.cancel()
         flowingText = null
@@ -656,8 +786,8 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
             fontScale = if (bookPrefs.contains(prefix + "font_scale")) bookPrefs.getFloat(prefix + "font_scale", global.fontScale) else null,
             twoColumns = if (bookPrefs.contains(prefix + "two_columns")) bookPrefs.getBoolean(prefix + "two_columns", global.twoColumns) else null,
             continuous = if (bookPrefs.contains(prefix + "continuous")) bookPrefs.getBoolean(prefix + "continuous", global.continuous) else null,
-            topMarginDp = if (bookPrefs.contains(prefix + "top_margin_dp")) bookPrefs.getFloat(prefix + "top_margin_dp", global.topMarginDp) else null,
-            bottomMarginDp = if (bookPrefs.contains(prefix + "bottom_margin_dp")) bookPrefs.getFloat(prefix + "bottom_margin_dp", global.bottomMarginDp) else null,
+        topMarginDp = if (bookPrefs.contains(prefix + "top_margin_dp")) bookPrefs.getFloat(prefix + "top_margin_dp", global.topMarginDp) else null,
+        bottomMarginDp = if (bookPrefs.contains(prefix + "bottom_margin_dp")) bookPrefs.getFloat(prefix + "bottom_margin_dp", global.bottomMarginDp) else null,
         )
     } else null
     return resolveReaderAppearance(global, overrides)
@@ -673,18 +803,18 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
         fontScale = prefs.getFloat("font_scale", 1f),
         twoColumns = prefs.getBoolean("two_columns", false),
         continuous = prefs.getBoolean("continuous", false),
-        topMarginDp = prefs.getFloat("top_margin_dp", 24f),
-        bottomMarginDp = prefs.getFloat("bottom_margin_dp", 24f),
+        topMarginDp = prefs.getFloat("top_margin_dp", 0f),
+        bottomMarginDp = prefs.getFloat("bottom_margin_dp", 0f),
     )
 }
 
 internal fun parseSavedLocator(json: String?): org.readium.r2.shared.publication.Locator? =
     json?.let { runCatching { org.readium.r2.shared.publication.Locator.fromJSON(JSONObject(it)) }.getOrNull() }
 
-private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
+private fun readingPreferences(appearance: ReaderAppearance, widthPx: Int, heightPx: Int) = EpubPreferences(
     backgroundColor = ReadiumColor(appearance.background),
-    columnCount = if (appearance.twoColumns) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
-    spread = if (appearance.twoColumns) org.readium.r2.navigator.preferences.Spread.ALWAYS else org.readium.r2.navigator.preferences.Spread.NEVER,
+    columnCount = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
+    spread = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) org.readium.r2.navigator.preferences.Spread.ALWAYS else org.readium.r2.navigator.preferences.Spread.NEVER,
     textColor = ReadiumColor(appearance.foreground),
     theme = when (appearance.theme) { "sepia" -> Theme.SEPIA; "night", "forest", "slate", "custom" -> Theme.DARK; else -> Theme.LIGHT },
     fontFamily = when (appearance.fontFamily) {
@@ -696,9 +826,21 @@ private fun readingPreferences(appearance: ReaderAppearance) = EpubPreferences(
     publisherStyles = appearance.fontFamily.isEmpty()
 )
 
-private fun readerMode(appearance: ReaderAppearance): String = when {
+private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, heightPx: Int) =
+    EpubNavigatorFragment.Configuration().apply {
+        readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) {
+            org.readium.r2.navigator.epub.css.RsProperties(
+                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(45.0),
+                colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
+            )
+        } else {
+            org.readium.r2.navigator.epub.css.RsProperties(colCount = org.readium.r2.navigator.epub.css.ColCount.ONE)
+        }
+    }
+
+private fun readerMode(appearance: ReaderAppearance, widthPx: Int, heightPx: Int): String = when {
     appearance.continuous -> "continuous"
-    appearance.twoColumns -> "double"
+    usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx) -> "double"
     else -> "single"
 }
 

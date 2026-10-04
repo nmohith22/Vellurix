@@ -6,7 +6,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Vellurix">
-        <activity android:name=".ReaderActivity" android:configChanges="orientation|screenSize|smallestScreenSize" android:exported="false" />
+        <activity android:name=".ReaderActivity" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout" android:exported="false" />
         <activity android:name=".WidgetConfigureActivity" android:exported="true" android:theme="@style/Theme.Vellurix" />
         <receiver android:name=".BookWidgetProvider" android:exported="true" android:label="Book">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>

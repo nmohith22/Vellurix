@@ -140,8 +140,8 @@ private fun FolioApp(resumeTick: Int) {
     var readerTheme by rememberSaveable { mutableStateOf(readerSettings.getString("theme", "paper") ?: "paper") }
     var readerFont by rememberSaveable { mutableStateOf(readerSettings.getString("font_family", "") ?: "") }
     var readerFontScale by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("font_scale", 1f)) }
-    var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 24f)) }
-    var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 24f)) }
+    var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 0f)) }
+    var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 0f)) }
     var readerTwoColumns by rememberSaveable { mutableStateOf(readerSettings.getBoolean("two_columns", false)) }
     var readerContinuous by rememberSaveable { mutableStateOf(readerSettings.getBoolean("continuous", false)) }
     var fontDialog by remember { mutableStateOf(false) }
@@ -162,8 +162,8 @@ private fun FolioApp(resumeTick: Int) {
             readerTheme = readerSettings.getString("theme", "paper") ?: "paper"
             readerFont = readerSettings.getString("font_family", "") ?: ""
             readerFontScale = readerSettings.getFloat("font_scale", 1f)
-            readerTopMargin = readerSettings.getFloat("top_margin_dp", 24f)
-            readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 24f)
+            readerTopMargin = readerSettings.getFloat("top_margin_dp", 0f)
+            readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 0f)
             readerTwoColumns = readerSettings.getBoolean("two_columns", false)
             readerContinuous = readerSettings.getBoolean("continuous", false)
             customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
@@ -299,7 +299,7 @@ private fun FolioApp(resumeTick: Int) {
                 TextButton(onClick = { bulkShelfDialog = true }) { Text("Move to shelf") }
                 TextButton(onClick = { selectedBooks.clear() }) { Text("Cancel") }
             }
-            LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(modifier = Modifier.padding(bottom = 12.dp), contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(shelves.size) { index ->
                     val shelf = shelves[index]
                     Surface(
@@ -356,15 +356,18 @@ private fun FolioApp(resumeTick: Int) {
     if (shelfDialog || shelfRenameTarget != null) AlertDialog(onDismissRequest = { shelfDialog = false; shelfRenameTarget = null; shelfName = "" }, title = { Text(if (shelfRenameTarget != null) "Rename shelf" else "Create a shelf") }, text = { OutlinedTextField(shelfName, { shelfName = it }, singleLine = true, label = { Text("Shelf name") }) }, confirmButton = {
         TextButton(onClick = {
             val name = shelfName.trim()
-            if (name.isNotEmpty() && shelves.none { it.equals(name, true) }) {
-                if (shelfRenameTarget != null) {
-                    val target = shelfRenameTarget!!
+            val targetShelf = shelfRenameTarget
+            val conflicts = shelves.any { it.equals(name, true) && !it.equals(targetShelf, true) }
+            if (name.isNotEmpty() && !conflicts) {
+                if (targetShelf != null) {
+                    val target = targetShelf
                     val index = shelves.indexOf(target)
                     if (index >= 0) {
                         shelves[index] = name
                         store.saveShelves(shelves.drop(1))
                         if (selectedShelf == target) selectedShelf = name
                         books.indices.forEach { i -> if (books[i].shelf == target) books[i] = books[i].copy(shelf = name) }
+                        renameShelfWidgetSelections(context.applicationContext, target, name)
                         saveBooks()
                     }
                 } else {

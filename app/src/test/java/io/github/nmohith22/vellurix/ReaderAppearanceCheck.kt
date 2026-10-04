@@ -18,4 +18,17 @@ class ReaderAppearanceCheck {
         assertEquals("", actual.fontFamily)
         assertEquals(1.4f, actual.fontScale)
     }
+
+    @Test fun columnsFollowViewportAspectAndKeepLandscapeSingleColumnAvailable() {
+        assertEquals(false, usesTwoColumns(true, false, 800, 1200))
+        assertEquals(true, usesTwoColumns(true, false, 1200, 800))
+        assertEquals(false, usesTwoColumns(false, false, 1200, 800))
+        assertEquals(false, usesTwoColumns(true, true, 1200, 800))
+    }
+
+    @Test fun readerMarginsDefaultToCompactPlatformSpacing() {
+        val appearance = ReaderAppearance(background = 0, foreground = 0)
+        assertEquals(0f, appearance.topMarginDp)
+        assertEquals(0f, appearance.bottomMarginDp)
+    }
 }
