@@ -132,8 +132,22 @@ private fun FolioApp(resumeTick: Int) {
     var customBackground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))) }
     var customForeground by rememberSaveable { mutableIntStateOf(readerSettings.getInt("foreground", android.graphics.Color.rgb(43,42,39))) }
     var search by remember { mutableStateOf("") }
+    var diagnosticReport by remember { mutableStateOf(ReaderDiagnostics.report(context)) }
     val scope = rememberCoroutineScope()
+    val saveDiagnosticReport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(diagnosticReport) }
+                ?: error("Couldn't write the report to that location.")
+        }.onSuccess {
+            ReaderDiagnostics.clear(context)
+            diagnosticReport = ""
+            Toast.makeText(context, "Crash report saved.", Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, "Couldn't save the crash report.", Toast.LENGTH_LONG).show()
+        }
+    }
     LaunchedEffect(resumeTick) {
+        diagnosticReport = ReaderDiagnostics.report(context)
         if (resumeTick > 0) {
             layoutMode = settings.getString("layout", "cards") ?: "cards"
             cardSize = settings.getFloat("card_size", 1f).coerceIn(.75f, 1.35f)
@@ -151,9 +165,11 @@ private fun FolioApp(resumeTick: Int) {
     }
     fun openBook(book: BookItem) {
         scope.launch {
+            ReaderDiagnostics.mark(context, "book tapped", book.format)
             val source = book.sourceUri ?: book.uri
             val readableUri = withContext(Dispatchers.IO) { ensureBookAccess(context, Uri.parse(book.uri), "$source.${book.format.lowercase()}") }
             if (readableUri == null) {
+                ReaderDiagnostics.mark(context, "file access failed")
                 Toast.makeText(context, "Can't access this file. Import it again to restore access.", Toast.LENGTH_LONG).show()
                 return@launch
             }
@@ -164,6 +180,7 @@ private fun FolioApp(resumeTick: Int) {
                 books[index] = updated
                 saveBooks()
             }
+            ReaderDiagnostics.mark(context, "starting reader activity")
             context.startActivity(Intent(context, ReaderActivity::class.java).apply {
                 putExtra(ReaderActivity.EXTRA_URI, readableUri)
                 putExtra(ReaderActivity.EXTRA_TITLE, book.title)
@@ -363,6 +380,16 @@ private fun FolioApp(resumeTick: Int) {
                         context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("font_scale", readerFontScale).apply()
                     })
                     Text("Hold a book for shelf and remove actions.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    HorizontalDivider()
+                    Text("Temporary crash diagnostics", style = MaterialTheme.typography.titleSmall)
+                    Text("Reports include the crash trace, device and app version, and the last reader step. They do not include book contents or file paths.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    TextButton(onClick = {
+                        diagnosticReport = ReaderDiagnostics.report(context)
+                        saveDiagnosticReport.launch("vellurix-crash-report.txt")
+                    }) {
+                        Text("Save crash report")
+                    }
+                    Text("After the app crashes, reopen Vellurix and save this report to attach it.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             },
             confirmButton = { TextButton(onClick = { settingsOpen = false }) { Text("Done") } },

@@ -67,6 +67,7 @@ class ReaderActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ReaderDiagnostics.mark(this, "reader activity created", intent.getStringExtra(EXTRA_FORMAT).orEmpty())
         val uri = intent.getStringExtra(EXTRA_URI)?.let(Uri::parse)
         if (uri == null) { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Reading"
@@ -310,14 +311,17 @@ private class ReaderHostFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val uri = arguments?.getString(ARG_URI)?.let(Uri::parse) ?: return showError("The selected book could not be opened.")
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
+        ReaderDiagnostics.mark(requireContext(), "reader view created", format)
         showLoading()
         viewLifecycleOwner.lifecycleScope.launch {
             runCatching {
                 val context = requireContext()
                 if (format in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) {
+                    ReaderDiagnostics.mark(context, "loading text file")
                     val raw = withContext(Dispatchers.IO) {
                         openBookStream(context, uri).bufferedReader(Charsets.UTF_8).use { it.readText() }
                     }
+                    ReaderDiagnostics.mark(context, "rendering text file")
                     clearLoading()
                     showText(formatText(raw, format))
                     return@runCatching
@@ -327,6 +331,7 @@ private class ReaderHostFragment : Fragment() {
                 val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
                 val parser = DefaultPublicationParser(context, httpClient, assetRetriever, PdfiumDocumentFactory(context))
                 suspend fun openPublication(source: Uri) = run {
+                    ReaderDiagnostics.mark(context, "retrieving publication")
                     val url = if (source.scheme == "file") File(source.path ?: error("Invalid local file location")).toUrl(isDirectory = false)
                     else source.toAbsoluteUrl() ?: error("Invalid file location")
                     val asset = assetRetriever.retrieve(url).getOrElse { error("The file could not be read.") }
@@ -346,17 +351,20 @@ private class ReaderHostFragment : Fragment() {
                         throw retryError
                     }
                 }
+                ReaderDiagnostics.mark(context, "publication parsed")
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 val factory = if (format == "PDF") PdfNavigatorFactory(publication, PdfiumEngineProvider()).createFragmentFactory(initialLocator = initialLocator)
                 else EpubNavigatorFactory(publication).createFragmentFactory(initialLocator = initialLocator, initialPreferences = readingPreferences(loadReaderAppearance(context, uri.toString())))
                 childFragmentManager.fragmentFactory = factory
+                ReaderDiagnostics.mark(context, "creating publication navigator")
                 clearLoading()
                 childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
                 val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? Navigator
                 if (navigator != null) navigator.currentLocator.collect { locator -> progress.edit().putString(uri.toString(), locator.toJSON().toString()).apply() }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
+                if (isAdded) ReaderDiagnostics.readerFailure(requireContext(), "opening failed", error)
                 if (isAdded) showError(error.message ?: "This file could not be opened.")
             }
         }
