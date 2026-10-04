@@ -56,3 +56,40 @@ jobs:
             fi
             rm -f "$notes_file"
           done
+      - name: Update README download link
+        run: |
+          latest_apk="$(find release -maxdepth 1 -type f -name 'Vellurix-*.apk' -printf '%f\n' | sort -V | tail -n 1)"
+          version="${latest_apk#Vellurix-}"
+          version="${version%.apk}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not determine the latest versioned APK." >&2
+            exit 1
+          fi
+
+          python3 - "$version" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = sys.argv[1]
+          readme = Path("README.md")
+          text = readme.read_text()
+          pattern = r"\*\*\[Download Vellurix \d+\.\d+\.\d+ for Android\]\(https://github\.com/nmohith22/Vellurix/releases/download/v\d+\.\d+\.\d+/Vellurix-\d+\.\d+\.\d+\.apk\)\*\*"
+          link = f"**[Download Vellurix {version} for Android](https://github.com/nmohith22/Vellurix/releases/download/v{version}/Vellurix-{version}.apk)**"
+          updated, count = re.subn(pattern, link, text, count=1)
+          if count != 1:
+              raise SystemExit("Expected exactly one versioned APK download link in README.md")
+          readme.write_text(updated)
+          PY
+
+          if git diff --quiet -- README.md; then
+            echo "README download link already targets Vellurix $version."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update README download to $version"
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
