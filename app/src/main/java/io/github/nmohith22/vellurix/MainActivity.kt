@@ -525,7 +525,7 @@ private fun migrateBookState(context: android.content.Context, fromUri: String, 
 private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(colors.first) }
-    val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .28f else .16f)
+    val cardColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
     Card(modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = cardColor), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column(Modifier.padding((10 * size).dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(.76f).clip(RoundedCornerShape(15.dp)).background(Brush.verticalGradient(listOf(colors.first, colors.second)))) {
@@ -537,6 +537,7 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () 
             }
             Text(book.title, Modifier.padding(start = 4.dp, top = 10.dp, end = 4.dp), style = MaterialTheme.typography.titleSmall, color = textColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(book.format, Modifier.padding(start = 4.dp, top = 3.dp, bottom = 2.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+            FilledTonalButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Open book") }
         }
     }
 }
@@ -546,7 +547,7 @@ private fun BookCard(book: BookItem, size: Float, textColor: Color, onClick: () 
 private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
     val fallback = CoverColors[(book.title.hashCode() and Int.MAX_VALUE) % CoverColors.size]
     var coverTone by remember(book.uri) { mutableStateOf(fallback.first) }
-    val rowColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .28f else .16f)
+    val rowColor = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.surface, coverTone, if (MaterialTheme.colorScheme.background.luminance() < .5f) .42f else .34f)
     Card(modifier = Modifier.fillMaxWidth().height((94 * size).dp).combinedClickable(onClick = onClick, onLongClick = onLongClick), colors = CardDefaults.cardColors(containerColor = rowColor)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxSize().padding(10.dp)) {
             Box(Modifier.width((54 * size).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(fallback.first, fallback.second)))) { BookCover(book, Modifier.fillMaxSize(), onDominantColor = { coverTone = Color(it) }) }
@@ -554,7 +555,7 @@ private fun BookRow(book: BookItem, size: Float, textColor: Color, onClick: () -
                 Text(book.title, color = textColor, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(book.format, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Icon(Icons.Rounded.AutoStories, "Open ${book.title}", tint = Accent)
+            IconButton(onClick = onClick) { Icon(Icons.Rounded.AutoStories, "Open ${book.title}", tint = Accent) }
         }
     }
 }

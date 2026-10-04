@@ -36,6 +36,8 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
+import java.io.File
+import java.security.MessageDigest
 import org.readium.adapter.pdfium.document.PdfiumDocumentFactory
 import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
@@ -308,31 +310,48 @@ private class ReaderHostFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val uri = arguments?.getString(ARG_URI)?.let(Uri::parse) ?: return showError("The selected book could not be opened.")
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
+        showLoading()
         viewLifecycleOwner.lifecycleScope.launch {
             runCatching {
                 val context = requireContext()
                 if (format in setOf("TXT", "HTML", "HTM", "FB2", "RTF")) {
                     val raw = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                            ?: error("The selected file is no longer available.")
+                        openBookStream(context, uri).bufferedReader(Charsets.UTF_8).use { it.readText() }
                     }
+                    clearLoading()
                     showText(formatText(raw, format))
                     return@runCatching
                 }
                 if (format !in setOf("EPUB", "PDF")) error("$format reading is not available yet.")
                 val httpClient = DefaultHttpClient()
                 val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
-                val url = if (uri.scheme == "file") {
-                    java.io.File(uri.path ?: error("Invalid local file location")).toUrl(isDirectory = false)
-                } else uri.toAbsoluteUrl() ?: error("Invalid file location")
-                val asset = assetRetriever.retrieve(url).getOrElse { error("The file could not be read.") }
                 val parser = DefaultPublicationParser(context, httpClient, assetRetriever, PdfiumDocumentFactory(context))
-                val publication = PublicationOpener(parser).open(asset, allowUserInteraction = true).getOrElse { error("This ${format.ifBlank { "file" }} could not be opened by the reader.") }
+                suspend fun openPublication(source: Uri) = run {
+                    val url = if (source.scheme == "file") File(source.path ?: error("Invalid local file location")).toUrl(isDirectory = false)
+                    else source.toAbsoluteUrl() ?: error("Invalid file location")
+                    val asset = assetRetriever.retrieve(url).getOrElse { error("The file could not be read.") }
+                    PublicationOpener(parser).open(asset, allowUserInteraction = true).getOrElse { error("This ${format.ifBlank { "file" }} could not be opened by the reader.") }
+                }
+                val publication = try {
+                    openPublication(uri)
+                } catch (originalError: Throwable) {
+                    if (originalError is CancellationException) throw originalError
+                    val localFile = withContext(Dispatchers.IO) { makeReaderCopy(context, uri, format) }
+                        ?: throw originalError
+                    try {
+                        openPublication(Uri.fromFile(localFile))
+                    } catch (retryError: Throwable) {
+                        if (retryError is CancellationException) throw retryError
+                        retryError.addSuppressed(originalError)
+                        throw retryError
+                    }
+                }
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 val factory = if (format == "PDF") PdfNavigatorFactory(publication, PdfiumEngineProvider()).createFragmentFactory(initialLocator = initialLocator)
                 else EpubNavigatorFactory(publication).createFragmentFactory(initialLocator = initialLocator, initialPreferences = readingPreferences(loadReaderAppearance(context, uri.toString())))
                 childFragmentManager.fragmentFactory = factory
+                clearLoading()
                 childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
                 val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? Navigator
                 if (navigator != null) navigator.currentLocator.collect { locator -> progress.edit().putString(uri.toString(), locator.toJSON().toString()).apply() }
@@ -345,8 +364,27 @@ private class ReaderHostFragment : Fragment() {
 
     private fun showError(message: String) {
         if (!isAdded) return
+        clearLoading()
         val errorView = TextView(requireContext()).apply { text = message; textSize = 16f; gravity = Gravity.CENTER; setTextColor(AndroidColor.rgb(73, 62, 55)); setPadding(28, 28, 28, 28) }
         (this.view as? FrameLayout)?.addView(errorView, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private var loadingView: View? = null
+
+    private fun showLoading() {
+        val label = TextView(requireContext()).apply {
+            text = "Opening book…"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(AndroidColor.rgb(73, 62, 55))
+        }
+        loadingView = label
+        (view as? FrameLayout)?.addView(label, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun clearLoading() {
+        loadingView?.let { (view as? FrameLayout)?.removeView(it) }
+        loadingView = null
     }
 
     private fun showText(text: String) {
@@ -395,6 +433,25 @@ private class ReaderHostFragment : Fragment() {
         fun create(uri: String, format: String) = ReaderHostFragment().apply { arguments = Bundle().apply { putString(ARG_URI, uri); putString(ARG_FORMAT, format) } }
     }
 }
+
+private fun openBookStream(context: android.content.Context, uri: Uri): java.io.InputStream =
+    if (uri.scheme == "file") File(uri.path ?: error("Invalid local file location")).inputStream()
+    else context.contentResolver.openInputStream(uri) ?: error("The selected file is no longer available.")
+
+private fun makeReaderCopy(context: android.content.Context, uri: Uri, format: String): File? = runCatching {
+    val digest = MessageDigest.getInstance("SHA-256").digest(uri.toString().toByteArray())
+        .take(12).joinToString("") { "%02x".format(it) }
+    val directory = File(context.cacheDir, "reader-fallback").apply { mkdirs() }
+    val target = File(directory, "$digest.${format.lowercase()}")
+    if (target.isFile && target.length() > 0L) return target
+    val temporary = File.createTempFile("reader-", ".tmp", directory)
+    try {
+        openBookStream(context, uri).use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
+        if (temporary.length() == 0L || !temporary.renameTo(target)) null else target
+    } finally {
+        temporary.delete()
+    }
+}.getOrNull()
 
 internal fun loadReaderAppearance(context: android.content.Context, uri: String): ReaderAppearance {
     val global = loadGlobalReaderAppearance(context)
