@@ -161,6 +161,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     var readerLineSpacing by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)) }
     var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 0f)) }
     var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 0f)) }
+    var readerColumnGap by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f)) }
     var readerTwoColumns by rememberSaveable { mutableStateOf(readerSettings.getBoolean("two_columns", false)) }
     var readerContinuous by rememberSaveable { mutableStateOf(readerSettings.getBoolean("continuous", false)) }
     var fontDialog by remember { mutableStateOf(false) }
@@ -225,6 +226,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
             readerLineSpacing = readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)
             readerTopMargin = readerSettings.getFloat("top_margin_dp", 0f)
             readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 0f)
+            readerColumnGap = readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f)
             readerTwoColumns = readerSettings.getBoolean("two_columns", false)
             readerContinuous = readerSettings.getBoolean("continuous", false)
             customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
@@ -578,6 +580,10 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                                     }
                                 }
                                 Text("Paginated by default. Continuous mode scrolls through long sections.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                                if (readerTwoColumns && !readerContinuous) {
+                                    Text("Middle column gap · ${readerColumnGap.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                                    Slider(value = readerColumnGap, onValueChange = { readerColumnGap = it }, valueRange = 0f..32f, onValueChangeFinished = { readerSettings.edit().putFloat("column_gap_dp", readerColumnGap).apply() })
+                                }
                                 Text("Top reading margin · ${readerTopMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
                                 Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
                                 Text("Bottom reading margin · ${readerBottomMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)

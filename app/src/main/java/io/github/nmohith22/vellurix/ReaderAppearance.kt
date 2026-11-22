@@ -11,6 +11,7 @@ internal data class ReaderAppearance(
     val continuous: Boolean = false,
     val topMarginDp: Float = 0f,
     val bottomMarginDp: Float = 0f,
+    val columnGapDp: Float = 4f,
 )
 
 internal data class ReaderThemePreset(val id: String, val name: String, val background: Int, val foreground: Int)
@@ -47,6 +48,7 @@ internal data class ReaderAppearanceOverrides(
     val continuous: Boolean? = null,
     val topMarginDp: Float? = null,
     val bottomMarginDp: Float? = null,
+    val columnGapDp: Float? = null,
 )
 
 internal fun resolveReaderAppearance(
@@ -63,7 +65,17 @@ internal fun resolveReaderAppearance(
     continuous = book?.continuous ?: global.continuous,
     topMarginDp = book?.topMarginDp ?: global.topMarginDp,
     bottomMarginDp = book?.bottomMarginDp ?: global.bottomMarginDp,
+    columnGapDp = book?.columnGapDp ?: global.columnGapDp,
 )
 
 internal fun usesTwoColumns(preferred: Boolean, continuous: Boolean, widthPx: Int, heightPx: Int): Boolean =
     preferred && !continuous && widthPx > heightPx
+
+internal fun readerUsesDarkCanvas(background: Int): Boolean {
+    val red = background shr 16 and 255
+    val green = background shr 8 and 255
+    val blue = background and 255
+    return (red * 299 + green * 587 + blue * 114) < 128_000
+}
+
+internal fun readerUsesOledBlack(background: Int): Boolean = background == 0xFF000000.toInt()

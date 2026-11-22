@@ -7,6 +7,11 @@ class ReaderAppearanceCheck {
     @Test fun deepReaderPresetsUsePureOledBlack() {
         assertEquals(0xFF000000.toInt(), readerPreset("deep_orange").first)
         assertEquals(0xFFC58B55.toInt(), readerPreset("deep_orange").second)
+        assertEquals(true, readerUsesDarkCanvas(readerPreset("deep_black").first))
+        assertEquals(false, readerUsesDarkCanvas(readerPreset("paper").first))
+        assertEquals(true, readerUsesOledBlack(readerPreset("deep_black").first))
+        assertEquals(true, readerUsesOledBlack(readerPreset("night").first))
+        assertEquals(false, readerUsesOledBlack(readerPreset("slate").first))
     }
 
     @Test fun absentBookOverridesKeepGlobalAppearance() {
@@ -36,5 +41,11 @@ class ReaderAppearanceCheck {
         val appearance = ReaderAppearance(background = 0, foreground = 0)
         assertEquals(0f, appearance.topMarginDp)
         assertEquals(0f, appearance.bottomMarginDp)
+    }
+
+    @Test fun columnGapOverridesRemainPerBookAndOtherwiseInherit() {
+        val global = ReaderAppearance(background = 0, foreground = -1, columnGapDp = 10f)
+        assertEquals(10f, resolveReaderAppearance(global, null).columnGapDp)
+        assertEquals(18f, resolveReaderAppearance(global, ReaderAppearanceOverrides(columnGapDp = 18f)).columnGapDp)
     }
 }
