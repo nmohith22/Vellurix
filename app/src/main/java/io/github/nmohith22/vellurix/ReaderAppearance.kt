@@ -68,8 +68,13 @@ internal fun resolveReaderAppearance(
     columnGapDp = book?.columnGapDp ?: global.columnGapDp,
 )
 
-internal fun usesTwoColumns(preferred: Boolean, continuous: Boolean, widthPx: Int, heightPx: Int): Boolean =
-    preferred && !continuous && widthPx > heightPx
+internal fun usesTwoColumns(
+    preferred: Boolean,
+    continuous: Boolean,
+    widthPx: Int,
+    heightPx: Int,
+    minimumTwoColumnWidthPx: Int = Int.MAX_VALUE,
+): Boolean = preferred && !continuous && (widthPx > heightPx || widthPx >= minimumTwoColumnWidthPx)
 
 internal fun readerUsesDarkCanvas(background: Int): Boolean {
     val red = background shr 16 and 255

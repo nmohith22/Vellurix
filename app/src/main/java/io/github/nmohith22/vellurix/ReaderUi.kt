@@ -338,10 +338,18 @@ private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, 
     val position = if (dragging) fingerProgress else progress.fraction.coerceIn(0f, 1f)
     val section = sectionIndexAt(position, progress.sections)
     val page = if (dragging && progress.total != null) (position * progress.total).toInt().plus(1).coerceAtMost(progress.total) else progress.position
+    val chapterProgress = chapterPageProgress(page, progress.total, progress.sections)
     Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 2.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("${page ?: "—"} / ${progress.total ?: "—"}", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
             Text("${(position * 100).toInt()}%", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
+        }
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                "Chapter · ${chapterProgress?.page ?: "—"} / ${chapterProgress?.total ?: "—"}",
+                color = foreground.copy(alpha = .58f),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            )
         }
         BoxWithConstraints(Modifier.fillMaxWidth().height(42.dp)) {
             val currentWidth = maxWidth

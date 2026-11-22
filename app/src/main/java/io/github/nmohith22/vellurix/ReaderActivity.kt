@@ -516,10 +516,11 @@ class ReaderHostFragment : Fragment() {
                 }
             }
             "EPUB" -> {
-                val desiredMode = readerMode(appearance, viewportWidthPx, viewportHeightPx)
+                val minimumTwoColumnWidthPx = (560f * resources.displayMetrics.density).toInt()
+                val desiredMode = readerMode(appearance, viewportWidthPx, viewportHeightPx, minimumTwoColumnWidthPx)
                 if (publication != null && (configuredMode != desiredMode || configuredColumnGapDp != appearance.columnGapDp || configuredViewportWidthPx != viewportWidthPx)) installPublication(publication!!, currentLocator())
                 else {
-                    val preferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx)
+                    val preferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx, minimumTwoColumnWidthPx)
                     if (preferences != submittedPreferences) {
                         (childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment)?.submitPreferences(preferences)
                         submittedPreferences = preferences
@@ -820,15 +821,32 @@ class ReaderHostFragment : Fragment() {
                         ?: resolved?.locations?.position?.let { if (totalPositions > 0) (it - 1).toDouble() / totalPositions else null }
                         ?: located?.locations?.totalProgression
                         ?: located?.locations?.position?.let { if (totalPositions > 0) (it - 1).toDouble() / totalPositions else null }
-                    start?.let { locatedSections.add(ReaderProgressSection(link.title ?: "Section ${index + 1}", it.toFloat().coerceIn(0f, 1f))) }
+                    start?.let {
+                        locatedSections.add(
+                            ReaderProgressSection(
+                                link.title ?: "Section ${index + 1}",
+                                it.toFloat().coerceIn(0f, 1f),
+                                resolved?.locations?.position ?: located?.locations?.position,
+                            )
+                        )
+                    }
                 }
-                val orderedSections = locatedSections.sortedBy { it.start }
+                val sortedSections = locatedSections.sortedBy { it.start }
+                val orderedSections = sortedSections.mapIndexed { index, section ->
+                    val firstPosition = section.firstPosition
+                    val nextPosition = sortedSections.drop(index + 1)
+                        .firstNotNullOfOrNull { next -> next.firstPosition?.takeIf { firstPosition == null || it > firstPosition } }
+                    section.copy(lastPosition = nextPosition?.minus(1) ?: totalPositions.takeIf { it > 0 })
+                }
                 progressSections = orderedSections.ifEmpty {
                     tocLinks.mapIndexed { index, link -> ReaderProgressSection(link.title ?: "Section ${index + 1}", index.toFloat() / tocLinks.size.coerceAtLeast(1)) }
                 }
                 val progress = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE)
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
-                if (format == "EPUB") configuredMode = readerMode(loadReaderAppearance(context, uri.toString()), viewportWidthPx, viewportHeightPx)
+                if (format == "EPUB") {
+                    val minimumWidth = (560f * resources.displayMetrics.density).toInt()
+                    configuredMode = readerMode(loadReaderAppearance(context, uri.toString()), viewportWidthPx, viewportHeightPx, minimumWidth)
+                }
                 clearLoading()
                 installPublication(publication, initialLocator)
             }.onFailure { error ->
@@ -842,18 +860,19 @@ class ReaderHostFragment : Fragment() {
         pageTurnAnimator?.cancel()
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
         val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        val density = resources.displayMetrics.density
+        val minimumTwoColumnWidthPx = (560f * density).toInt()
         (view as? FrameLayout)?.let { host ->
-            val density = resources.displayMetrics.density
             host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
             host.clipToPadding = true
         }
         childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
         else EpubNavigatorFactory(value).createFragmentFactory(
             initialLocator = locator,
-            initialPreferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx),
-            configuration = epubColumnConfiguration(appearance, viewportWidthPx, viewportHeightPx),
+            initialPreferences = readingPreferences(appearance, viewportWidthPx, viewportHeightPx, minimumTwoColumnWidthPx),
+            configuration = epubColumnConfiguration(appearance, viewportWidthPx, viewportHeightPx, minimumTwoColumnWidthPx, density),
         )
-        submittedPreferences = if (format == "EPUB") readingPreferences(appearance, viewportWidthPx, viewportHeightPx) else null
+        submittedPreferences = if (format == "EPUB") readingPreferences(appearance, viewportWidthPx, viewportHeightPx, minimumTwoColumnWidthPx) else null
         configuredColumnGapDp = if (format == "EPUB") appearance.columnGapDp else null
         configuredViewportWidthPx = if (format == "EPUB") viewportWidthPx else null
         childFragmentManager.commitNow { replace(containerId, if (format == "PDF") PdfNavigatorFragment::class.java else EpubNavigatorFragment::class.java, Bundle(), "publication_reader") }
@@ -1065,10 +1084,10 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
 internal fun parseSavedLocator(json: String?): org.readium.r2.shared.publication.Locator? =
     json?.let { runCatching { org.readium.r2.shared.publication.Locator.fromJSON(JSONObject(it)) }.getOrNull() }
 
-private fun readingPreferences(appearance: ReaderAppearance, widthPx: Int, heightPx: Int) = EpubPreferences(
+private fun readingPreferences(appearance: ReaderAppearance, widthPx: Int, heightPx: Int, minimumTwoColumnWidthPx: Int = Int.MAX_VALUE) = EpubPreferences(
     backgroundColor = ReadiumColor(appearance.background),
-    columnCount = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
-    spread = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) org.readium.r2.navigator.preferences.Spread.ALWAYS else org.readium.r2.navigator.preferences.Spread.NEVER,
+    columnCount = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx, minimumTwoColumnWidthPx)) org.readium.r2.navigator.preferences.ColumnCount.TWO else org.readium.r2.navigator.preferences.ColumnCount.ONE,
+    spread = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx, minimumTwoColumnWidthPx)) org.readium.r2.navigator.preferences.Spread.ALWAYS else org.readium.r2.navigator.preferences.Spread.NEVER,
     textColor = ReadiumColor(appearance.foreground),
     theme = when {
         appearance.theme == "sepia" -> Theme.SEPIA
@@ -1085,22 +1104,24 @@ private fun readingPreferences(appearance: ReaderAppearance, widthPx: Int, heigh
     publisherStyles = appearance.fontFamily.isEmpty() && appearance.lineSpacing <= 1f && !readerUsesOledBlack(appearance.background)
 )
 
-private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, heightPx: Int) =
+private fun epubColumnConfiguration(appearance: ReaderAppearance, widthPx: Int, heightPx: Int, minimumTwoColumnWidthPx: Int = Int.MAX_VALUE, density: Float = 1f) =
     EpubNavigatorFragment.Configuration().apply {
-        readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx)) {
+        readiumCssRsProperties = if (usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx, minimumTwoColumnWidthPx)) {
+            val gapDp = appearance.columnGapDp.coerceIn(0f, 32f)
+            val widthDp = widthPx / density.coerceAtLeast(1f)
             org.readium.r2.navigator.epub.css.RsProperties(
-                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(((100f - ((appearance.columnGapDp.coerceIn(0f, 32f) / widthPx.coerceAtLeast(1)) * 100f)) / 2f).toDouble()),
+                colWidth = org.readium.r2.navigator.epub.css.Length.Vw(((100f - (gapDp / widthDp.coerceAtLeast(1f) * 100f)) / 2f).toDouble()),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
-                colGap = org.readium.r2.navigator.epub.css.Length.Px(appearance.columnGapDp.coerceIn(0f, 32f).toDouble()),
+                colGap = org.readium.r2.navigator.epub.css.Length.Px(gapDp.toDouble()),
             )
         } else {
             org.readium.r2.navigator.epub.css.RsProperties(colCount = org.readium.r2.navigator.epub.css.ColCount.ONE)
         }
     }
 
-private fun readerMode(appearance: ReaderAppearance, widthPx: Int, heightPx: Int): String = when {
+private fun readerMode(appearance: ReaderAppearance, widthPx: Int, heightPx: Int, minimumTwoColumnWidthPx: Int = Int.MAX_VALUE): String = when {
     appearance.continuous -> "continuous"
-    usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx) -> "double"
+    usesTwoColumns(appearance.twoColumns, appearance.continuous, widthPx, heightPx, minimumTwoColumnWidthPx) -> "double"
     else -> "single"
 }
 
