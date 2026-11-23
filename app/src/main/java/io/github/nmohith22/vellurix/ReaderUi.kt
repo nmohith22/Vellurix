@@ -1,6 +1,7 @@
 package io.github.nmohith22.vellurix
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -9,10 +10,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -22,11 +25,12 @@ import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
@@ -35,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowLeft
@@ -56,6 +61,12 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,16 +132,21 @@ internal fun ReaderOverlay(
 ) {
     var bookmarkTab by remember { mutableStateOf(false) }
     var themeCarousel by remember { mutableStateOf(false) }
-    LaunchedEffect(customizeBook) { if (!customizeBook) themeCarousel = false }
+    LaunchedEffect(customizeBook, visible) { if (!customizeBook || !visible) themeCarousel = false }
     val bg = Color(appearance.background)
     val fg = Color(appearance.foreground)
-    val accent = Color(appAccent)
     val bookmarkTint = bookmarkRibbonTint(appearance.background)
-    val panel = if (bg.luminance() < .3f) Color(0xEE202124) else Color(0xEEF8F6F1)
+    val panel = androidx.compose.ui.graphics.lerp(bg, fg, if (bg.luminance() < .3f) .10f else .05f)
+    val preferredAccent = Color(appAccent)
+    val panelLightness = panel.luminance()
+    val accentLightness = preferredAccent.luminance()
+    val accentContrast = (maxOf(panelLightness, accentLightness) + .05f) / (minOf(panelLightness, accentLightness) + .05f)
+    val accent = if (accentContrast >= 3f) preferredAccent else fg
     BackHandler(enabled = drawerOpen || settingsOpen || visible) {
         when {
             settingsOpen -> onSettingsOpenChange(false)
             drawerOpen -> onDrawerOpenChange(false)
+            themeCarousel -> themeCarousel = false
             else -> onHideControls()
         }
     }
@@ -159,43 +175,35 @@ internal fun ReaderOverlay(
             }
         })
 
-        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible && !settingsOpen, enter = fadeIn(tween(150)), exit = fadeOut(tween(120)), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Surface(
-                    modifier = Modifier.align(Alignment.TopCenter).widthIn(max = 720.dp).fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 18.dp),
-                    shape = RoundedCornerShape(22.dp), color = panel, shadowElevation = 12.dp,
+                    modifier = Modifier.align(Alignment.TopCenter).widthIn(max = 720.dp).fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                    shape = RoundedCornerShape(18.dp), color = panel, shadowElevation = 4.dp,
                 ) {
                     Row(Modifier.heightIn(min = 58.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Close reader", tint = fg) }
-                        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                            Text("NOW READING", color = accent, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.7.sp, fontWeight = FontWeight.Bold)
-                            Text(title, color = fg, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        Text(title, Modifier.weight(1f).padding(horizontal = 8.dp), color = fg, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         IconButton(onClick = onBookmark) { Icon(if (isCurrentPageBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkAdd, if (isCurrentPageBookmarked) "Remove bookmark" else "Add bookmark", tint = if (isCurrentPageBookmarked) bookmarkTint else fg) }
                         IconButton(onClick = { onSettingsOpenChange(true) }) { Icon(Icons.Rounded.Tune, "Reader settings", tint = fg) }
                     }
                 }
                 Surface(
-                    modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 20.dp),
-                    shape = RoundedCornerShape(24.dp), color = panel, shadowElevation = 12.dp,
+                    modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth().padding(start = 6.dp, end = 6.dp, bottom = 12.dp),
+                    shape = RoundedCornerShape(18.dp), color = panel, shadowElevation = 4.dp,
                 ) {
                     Column {
-                        ReaderProgressSeeker(progress, fg, accent, onSeek)
-                        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = fg, modifier = Modifier.size(30.dp)) }
-                            AnimatedVisibility(visible = !themeCarousel) { IconButton(modifier = Modifier.size(40.dp), enabled = customizeBook, onClick = { themeCarousel = true }) { Icon(Icons.Rounded.ColorLens, "Theme", tint = fg.copy(alpha = if (customizeBook) 1f else .38f)) } }
-                            AnimatedVisibility(visible = themeCarousel && customizeBook, modifier = Modifier.weight(1f)) {
-                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.Center) {
-                                    readerThemePresets.forEach { preset ->
-                                        Surface(onClick = { onTheme(preset.id); themeCarousel = false }, color = Color(preset.background), shape = CircleShape, modifier = Modifier.padding(horizontal = 3.dp)) { Text(preset.name, Modifier.padding(horizontal = 9.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelSmall) }
-                                    }
-                                }
-                            }
-                            IconButton(modifier = Modifier.size(40.dp), onClick = onRotate) { Icon(if (autoRotate) Icons.Rounded.ScreenRotation else Icons.Rounded.ScreenLockPortrait, if (autoRotate) "Auto rotate on" else "Portrait locked", tint = if (autoRotate) accent else fg) }
-                            IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = false; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.MenuBook, "Contents", tint = fg) }
-                            IconButton(modifier = Modifier.size(40.dp), onClick = { bookmarkTab = true; onDrawerOpenChange(true) }) { Icon(Icons.Rounded.Bookmark, "Bookmarks", tint = fg) }
-                            IconButton(modifier = Modifier.size(40.dp), onClick = { onTurn(true) }) { Icon(Icons.Rounded.KeyboardArrowRight, "Next page", tint = fg, modifier = Modifier.size(30.dp)) }
+                        Box(Modifier.padding(horizontal = 12.dp)) {
+                            ReaderProgressSeeker(progress, fg, accent, onSeek)
                         }
+                        ReaderToolbar(
+                            themesOpen = themeCarousel && customizeBook, customizeBook = customizeBook,
+                            theme = appearance.theme, autoRotate = autoRotate, foreground = fg, accent = accent,
+                            onThemesOpen = { themeCarousel = it },
+                            onTheme = { onTheme(it); themeCarousel = false },
+                            onRotate = onRotate, onTurn = onTurn,
+                            onDrawer = { bookmarksTab -> bookmarkTab = bookmarksTab; onDrawerOpenChange(true) },
+                        )
                     }
                 }
             }
@@ -267,65 +275,183 @@ internal fun ReaderOverlay(
 }
 
 @Composable
+private fun ReaderToolbar(
+    themesOpen: Boolean, customizeBook: Boolean, theme: String, autoRotate: Boolean,
+    foreground: Color, accent: Color, onThemesOpen: (Boolean) -> Unit, onTheme: (String) -> Unit,
+    onRotate: () -> Unit, onTurn: (Boolean) -> Unit, onDrawer: (Boolean) -> Unit,
+) {
+    val selectedFill = accent.copy(alpha = .2f)
+    AnimatedContent(
+        targetState = themesOpen,
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) },
+        label = "reader theme carousel",
+    ) { expanded ->
+        if (expanded) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onThemesOpen(false) }) { Icon(Icons.Rounded.Close, "Close themes", tint = foreground) }
+                val selectedIndex = readerThemePresets.indexOfFirst { it.id == theme }.coerceAtLeast(0)
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    state = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex),
+                    contentPadding = PaddingValues(end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items(readerThemePresets, key = { it.id }) { preset ->
+                        val selected = preset.id == theme
+                        FilterChip(
+                            selected = selected, onClick = { onTheme(preset.id) },
+                            label = { Text(preset.name, maxLines = 1) },
+                            leadingIcon = if (selected) ({ Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }) else null,
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color(preset.background), labelColor = Color(preset.foreground),
+                                selectedContainerColor = Color(preset.background), selectedLabelColor = Color(preset.foreground),
+                                selectedLeadingIconColor = Color(preset.foreground),
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) accent else Color(preset.foreground).copy(alpha = .3f)),
+                        )
+                    }
+                }
+            }
+        } else {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val scroll = if (maxWidth < 288.dp) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+                Row(Modifier.fillMaxSize().then(scroll), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                    IconButton(onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = foreground) }
+                    val preset = readerThemePresets.firstOrNull { it.id == theme }
+                    IconButton(enabled = customizeBook, onClick = { onThemesOpen(true) }) {
+                        if (preset == null) Icon(Icons.Rounded.ColorLens, "Custom reading theme", tint = foreground.copy(alpha = if (customizeBook) 1f else .38f))
+                        else {
+                            Box(
+                                Modifier.size(26.dp).clip(CircleShape).background(Color(preset.background))
+                                    .border(1.dp, foreground.copy(alpha = .35f), CircleShape)
+                                    .semantics { contentDescription = "Reading theme: ${preset.name}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("Aa", color = Color(preset.foreground), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    FilledTonalIconToggleButton(
+                        checked = autoRotate, onCheckedChange = { onRotate() },
+                        colors = IconButtonDefaults.filledTonalIconToggleButtonColors(
+                            containerColor = Color.Transparent, contentColor = foreground,
+                            checkedContainerColor = selectedFill, checkedContentColor = foreground,
+                        ),
+                    ) {
+                        Icon(if (autoRotate) Icons.Rounded.ScreenRotation else Icons.Rounded.ScreenLockPortrait, "Auto rotate")
+                    }
+                    IconButton(onClick = { onDrawer(false) }) { Icon(Icons.Rounded.MenuBook, "Contents", tint = foreground) }
+                    IconButton(onClick = { onDrawer(true) }) { Icon(Icons.Rounded.Bookmark, "Bookmarks", tint = foreground) }
+                    IconButton(onClick = { onTurn(true) }) { Icon(Icons.Rounded.KeyboardArrowRight, "Next page", tint = foreground) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boolean, transition: String, supportsTwoColumns: Boolean, onDismiss: () -> Unit, onAppearance: (ReaderAppearance) -> Unit, onCustomizeBook: (Boolean) -> Unit, onResetBook: () -> Unit, onTransition: (String) -> Unit, onReadingMode: (String) -> Unit) {
     var appearance by remember(current) { mutableStateOf(current) }
     var fontMenu by remember { mutableStateOf(false) }
     var colorTarget by remember { mutableStateOf("background") }
     var settingsTab by remember { mutableIntStateOf(0) }
     val fonts = listOf("" to "Publisher default", "serif" to "Serif", "sans-serif" to "Sans serif", "cursive" to "Cursive", "fantasy" to "Fantasy", "monospace" to "Monospace", "OpenDyslexic" to "OpenDyslexic", "AccessibleDfA" to "Accessible DfA", "iA Writer Duospace" to "iA Writer Duospace")
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val wide = maxWidth >= 700.dp
-            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = if (wide) .10f else .34f)))
-            Surface(modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(440.dp).fillMaxHeight().padding(vertical = 12.dp, horizontal = 14.dp) else Modifier.align(Alignment.Center).fillMaxWidth(.94f).widthIn(max = 560.dp).heightIn(max = maxHeight - 32.dp), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 22.dp) {
-                Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Reading experience", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold); IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Close settings") } }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Customize this book", style = MaterialTheme.typography.titleSmall); Text(if (customizeBook) "Book-only overrides are enabled" else "Using global defaults", style = MaterialTheme.typography.bodySmall) }; Switch(checked = customizeBook, onCheckedChange = onCustomizeBook) }
-                    if (!customizeBook) Text("Turn on Customize this book to edit its appearance and layout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ScrollableTabRow(selectedTabIndex = settingsTab, edgePadding = 0.dp) {
-                        listOf("Appearance", "Layout", "Controls").forEachIndexed { index, title -> Tab(selected = settingsTab == index, onClick = { settingsTab = index }, text = { Text(title) }) }
+    val panel: @Composable (Boolean) -> Unit = { wide ->
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Reader settings", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold); IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Close settings") } }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Customize this book", style = MaterialTheme.typography.titleSmall); Text(if (customizeBook) "Book-only overrides are enabled" else "Using global defaults", style = MaterialTheme.typography.bodySmall) }; Switch(checked = customizeBook, onCheckedChange = onCustomizeBook) }
+            ScrollableTabRow(selectedTabIndex = settingsTab, edgePadding = 0.dp) {
+                listOf("Appearance", "Layout", "Controls").forEachIndexed { index, title -> Tab(selected = settingsTab == index, onClick = { settingsTab = index }, text = { Text(title) }) }
+            }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                when (settingsTab) {
+                    0 -> {
+                        if (!wide) ReaderAppearancePreview(appearance)
+                        Text("Reading theme", style = MaterialTheme.typography.titleSmall)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { readerThemePresets.forEach { preset -> Surface(onClick = { appearance = appearance.copy(theme = preset.id, background = preset.background, foreground = preset.foreground); onAppearance(appearance) }, enabled = customizeBook, shape = RoundedCornerShape(14.dp), color = Color(preset.background), border = if (appearance.theme == preset.id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.alpha(if (customizeBook) 1f else .48f)) { Text(preset.name, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelMedium) } } }
+                        Text("Text size · ${(appearance.fontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.fontScale, onValueChange = { appearance = appearance.copy(fontScale = it); onAppearance(appearance) }, valueRange = .8f..2f, enabled = customizeBook)
+                        Text("Line spacing · ${(appearance.lineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.lineSpacing, onValueChange = { appearance = appearance.copy(lineSpacing = it); onAppearance(appearance) }, valueRange = 1f..2f, enabled = customizeBook)
+                        Text("Higher line spacing overrides publisher text styles in EPUBs.", style = MaterialTheme.typography.bodySmall)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Typeface", style = MaterialTheme.typography.titleSmall); Text(fonts.firstOrNull { it.first == appearance.fontFamily }?.second ?: "Publisher default", style = MaterialTheme.typography.bodySmall) }; Box { TextButton(onClick = { fontMenu = true }, enabled = customizeBook) { Text("Change") }; DropdownMenu(expanded = fontMenu && customizeBook, onDismissRequest = { fontMenu = false }) { fonts.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, enabled = customizeBook, onClick = { appearance = appearance.copy(fontFamily = value); onAppearance(appearance); fontMenu = false }) } } } }
+                        Text("Colors", style = MaterialTheme.typography.titleSmall)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = colorTarget == "background", onClick = { colorTarget = "background" }, enabled = customizeBook, label = { Text("Page") }); FilterChip(selected = colorTarget == "foreground", onClick = { colorTarget = "foreground" }, enabled = customizeBook, label = { Text("Text") }); Box(Modifier.size(30.dp).clip(CircleShape).background(Color(if (colorTarget == "background") appearance.background else appearance.foreground))) }
+                        if (colorTarget == "background") Text("Tap the wheel center for OLED black (#000000).", style = MaterialTheme.typography.bodySmall)
+                        ReaderColorWheel(Modifier.fillMaxWidth().height(180.dp).alpha(if (customizeBook) 1f else .42f), enabled = customizeBook) { color -> appearance = if (colorTarget == "background") appearance.copy(theme = "custom", background = color) else appearance.copy(theme = "custom", foreground = color); onAppearance(appearance) }
+                        if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
                     }
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        when (settingsTab) {
-                            0 -> {
-                                Surface(shape = RoundedCornerShape(16.dp), color = Color(appearance.background), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("LIVE PREVIEW", color = Color(appearance.foreground).copy(alpha = .65f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp); Text("A chapter begins here", color = Color(appearance.foreground), fontSize = (16 * appearance.fontScale).sp, lineHeight = (20 * appearance.fontScale * appearance.lineSpacing).sp, fontWeight = FontWeight.SemiBold); Text("Your colors, typeface, spacing and text size update as you change them.", color = Color(appearance.foreground).copy(alpha = .82f), fontSize = (13 * appearance.fontScale).sp, lineHeight = (18 * appearance.fontScale * appearance.lineSpacing).sp, maxLines = 2) } }
-                                Text("Reading theme", style = MaterialTheme.typography.titleSmall)
-                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { readerThemePresets.forEach { preset -> Surface(onClick = { appearance = appearance.copy(theme = preset.id, background = preset.background, foreground = preset.foreground); onAppearance(appearance) }, enabled = customizeBook, shape = RoundedCornerShape(14.dp), color = Color(preset.background), border = if (appearance.theme == preset.id) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.alpha(if (customizeBook) 1f else .48f)) { Text(preset.name, Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Color(preset.foreground), style = MaterialTheme.typography.labelMedium) } } }
-                                Text("Text size · ${(appearance.fontScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                                Slider(value = appearance.fontScale, onValueChange = { appearance = appearance.copy(fontScale = it); onAppearance(appearance) }, valueRange = .8f..2f, enabled = customizeBook)
-                                Text("Line spacing · ${(appearance.lineSpacing * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                                Slider(value = appearance.lineSpacing, onValueChange = { appearance = appearance.copy(lineSpacing = it); onAppearance(appearance) }, valueRange = 1f..2f, enabled = customizeBook)
-                                Text("Higher line spacing overrides publisher text styles in EPUBs.", style = MaterialTheme.typography.bodySmall)
-                                Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Typeface", style = MaterialTheme.typography.titleSmall); Text(fonts.firstOrNull { it.first == appearance.fontFamily }?.second ?: "Publisher default", style = MaterialTheme.typography.bodySmall) }; Box { TextButton(onClick = { fontMenu = true }, enabled = customizeBook) { Text("Change") }; DropdownMenu(expanded = fontMenu && customizeBook, onDismissRequest = { fontMenu = false }) { fonts.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, enabled = customizeBook, onClick = { appearance = appearance.copy(fontFamily = value); onAppearance(appearance); fontMenu = false }) } } } }
-                                Text("Colors", style = MaterialTheme.typography.titleSmall)
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = colorTarget == "background", onClick = { colorTarget = "background" }, enabled = customizeBook, label = { Text("Page") }); FilterChip(selected = colorTarget == "foreground", onClick = { colorTarget = "foreground" }, enabled = customizeBook, label = { Text("Text") }); Box(Modifier.size(30.dp).clip(CircleShape).background(Color(if (colorTarget == "background") appearance.background else appearance.foreground))) }
-                                if (colorTarget == "background") Text("Tap the wheel center for OLED black (#000000).", style = MaterialTheme.typography.bodySmall)
-                                ReaderColorWheel(Modifier.fillMaxWidth().height(180.dp).alpha(if (customizeBook) 1f else .42f), enabled = customizeBook) { color -> appearance = if (colorTarget == "background") appearance.copy(theme = "custom", background = color) else appearance.copy(theme = "custom", foreground = color); onAppearance(appearance) }
-                                if (customizeBook) TextButton(onClick = onResetBook) { Text("Reset this book to global defaults") }
-                            }
-                            1 -> {
-                                if (supportsTwoColumns) { Text("Page layout", style = MaterialTheme.typography.titleSmall); Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) -> val selected = when (mode) { "double" -> appearance.twoColumns && !appearance.continuous; "continuous" -> appearance.continuous; else -> !appearance.twoColumns && !appearance.continuous }; FilterChip(selected = selected, onClick = { onReadingMode(mode) }, enabled = customizeBook, label = { Text(label) }) } }; Text("Paginated by default. Continuous mode scrolls through a long section.", style = MaterialTheme.typography.bodySmall) }
-                                if (supportsTwoColumns && appearance.twoColumns && !appearance.continuous) {
-                                    Text("Middle column gap · ${appearance.columnGapDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                                    Slider(value = appearance.columnGapDp, onValueChange = { appearance = appearance.copy(columnGapDp = it); onAppearance(appearance) }, valueRange = 0f..32f, enabled = customizeBook)
-                                }
-                                Text("Top margin · ${appearance.topMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                                Slider(value = appearance.topMarginDp, onValueChange = { appearance = appearance.copy(topMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f, enabled = customizeBook)
-                                Text("Bottom margin · ${appearance.bottomMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                                Slider(value = appearance.bottomMarginDp, onValueChange = { appearance = appearance.copy(bottomMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f, enabled = customizeBook)
-                            }
-                            else -> {
-                                Text("Page transition (global)", style = MaterialTheme.typography.titleSmall)
-                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) { listOf("none", "fade", "slide", "page turn").forEach { mode -> FilterChip(selected = transition == mode, onClick = { onTransition(mode) }, label = { Text(mode.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall) }) } }
-                                Text("This setting applies across books.", style = MaterialTheme.typography.bodySmall)
-                            }
+                    1 -> {
+                        if (supportsTwoColumns) { Text("Page layout", style = MaterialTheme.typography.titleSmall); Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) -> val selected = when (mode) { "double" -> appearance.twoColumns && !appearance.continuous; "continuous" -> appearance.continuous; else -> !appearance.twoColumns && !appearance.continuous }; FilterChip(selected = selected, onClick = { onReadingMode(mode) }, enabled = customizeBook, label = { Text(label) }) } }; Text("Paginated by default. Continuous mode scrolls through a long section.", style = MaterialTheme.typography.bodySmall) }
+                        if (supportsTwoColumns && appearance.twoColumns && !appearance.continuous) {
+                            Text("Middle column gap · ${appearance.columnGapDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                            Slider(value = appearance.columnGapDp, onValueChange = { appearance = appearance.copy(columnGapDp = it); onAppearance(appearance) }, valueRange = 0f..32f, enabled = customizeBook)
                         }
+                        Text("Top margin · ${appearance.topMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.topMarginDp, onValueChange = { appearance = appearance.copy(topMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f, enabled = customizeBook)
+                        Text("Bottom margin · ${appearance.bottomMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
+                        Slider(value = appearance.bottomMarginDp, onValueChange = { appearance = appearance.copy(bottomMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f, enabled = customizeBook)
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = onDismiss) { Text("Done") } }
+                    else -> {
+                        Text("Page transition (global)", style = MaterialTheme.typography.titleSmall)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) { listOf("none", "fade", "slide", "page turn").forEach { mode -> FilterChip(selected = transition == mode, onClick = { onTransition(mode) }, label = { Text(mode.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall) }) } }
+                        Text("This setting applies across books.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = onDismiss) { Text("Done") } }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        if (maxWidth >= 600.dp && maxHeight >= 420.dp) {
+            Box(Modifier.matchParentSize().pointerInput(onDismiss) { detectTapGestures { onDismiss() } })
+            Surface(
+                modifier = Modifier.align(Alignment.CenterEnd).padding(12.dp)
+                    .width((maxWidth * .46f).coerceIn(300.dp, 396.dp)).fillMaxHeight(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 6.dp,
+            ) { panel(true) }
+        } else {
+            Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    Box(Modifier.matchParentSize().pointerInput(onDismiss) { detectTapGestures { onDismiss() } })
+                    Surface(
+                        modifier = Modifier.align(Alignment.Center).padding(12.dp)
+                            .widthIn(max = 520.dp).fillMaxWidth().heightIn(max = maxHeight - 24.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                    ) { panel(false) }
                 }
             }
         }
+    }
+}
 
+@Composable
+private fun ReaderAppearancePreview(appearance: ReaderAppearance) {
+    val foreground = Color(appearance.foreground)
+    val typeface = when (appearance.fontFamily) {
+        "sans-serif" -> FontFamily.SansSerif
+        "cursive" -> FontFamily.Cursive
+        "monospace", "iA Writer Duospace" -> FontFamily.Monospace
+        else -> FontFamily.Serif
+    }
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(appearance.background),
+        border = androidx.compose.foundation.BorderStroke(1.dp, foreground.copy(alpha = .24f)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Preview", color = foreground.copy(alpha = .78f), style = MaterialTheme.typography.labelSmall)
+            Text(
+                "By the time the rain lifted, the lights across the harbor had come on.",
+                color = foreground, fontFamily = typeface, fontSize = (16 * appearance.fontScale).sp,
+                lineHeight = (21 * appearance.fontScale * appearance.lineSpacing).sp,
+            )
+        }
     }
 }
 
@@ -339,21 +465,26 @@ private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, 
     val section = sectionIndexAt(position, progress.sections)
     val page = if (dragging && progress.total != null) (position * progress.total).toInt().plus(1).coerceAtMost(progress.total) else progress.position
     val chapterProgress = chapterPageProgress(page, progress.total, progress.sections)
+    val counterStyle = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")
     Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 2.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("${page ?: "—"} / ${progress.total ?: "—"}", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
-            Text("${(position * 100).toInt()}%", color = foreground.copy(alpha = .76f), style = MaterialTheme.typography.labelSmall)
+            Text("${page ?: "—"} / ${progress.total ?: "—"}", color = foreground.copy(alpha = .82f), style = counterStyle)
+            Text("${(position * 100).toInt()}%", color = foreground.copy(alpha = .82f), style = counterStyle)
         }
         Row(Modifier.fillMaxWidth()) {
             Text(
                 "Chapter · ${chapterProgress?.page ?: "—"} / ${chapterProgress?.total ?: "—"}",
-                color = foreground.copy(alpha = .58f),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = foreground.copy(alpha = .74f),
+                style = counterStyle.copy(fontSize = 9.sp),
             )
         }
         BoxWithConstraints(Modifier.fillMaxWidth().height(42.dp)) {
             val currentWidth = maxWidth
-            Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(30.dp).pointerInput(progress.sections.size) {
+            Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(30.dp).semantics {
+                contentDescription = "Reading progress"
+                progressBarRangeInfo = ProgressBarRangeInfo(position, 0f..1f)
+                setProgress { onSeek(it.coerceIn(0f, 1f)); true }
+            }.pointerInput(progress.sections.size) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     fingerProgress = (down.position.x / size.width).coerceIn(0f, 1f)

@@ -245,20 +245,20 @@ class ReaderActivity : FragmentActivity() {
                     onTheme = { id ->
                         if (customizeThisBook) {
                             val colors = readerPreset(id)
-                            saveAppearance((appearance ?: loadGlobalReaderAppearanceForActivity()).copy(theme = id, background = colors.first, foreground = colors.second))
+                            saveAppearance((appearance ?: loadGlobalReaderAppearance(this@ReaderActivity)).copy(theme = id, background = colors.first, foreground = colors.second))
                         }
                     },
                     onCustomizeBook = { enabled ->
                         customizeThisBook = enabled
                         getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putBoolean("customize_this_book", enabled).apply()
-                        appearance = if (enabled) loadReaderAppearance(this@ReaderActivity, uri.toString()) else loadGlobalReaderAppearanceForActivity()
+                        showAppearance(if (enabled) loadReaderAppearance(this@ReaderActivity, uri.toString()) else loadGlobalReaderAppearance(this@ReaderActivity))
                         twoColumns = getScopedBoolean("two_columns", false)
                     },
                     onResetBook = {
                         val prefs = getSharedPreferences("reader_book_appearance", MODE_PRIVATE)
                         val prefix = "${uri}|"
                         prefs.edit().also { e -> listOf("theme", "background", "foreground", "font_family", "font_scale", "line_spacing", "two_columns", "continuous", "top_margin_dp", "bottom_margin_dp", "column_gap_dp").forEach { e.remove(prefix + it) } }.apply()
-                        appearance = loadReaderAppearance(this@ReaderActivity, uri.toString())
+                        showAppearance(loadReaderAppearance(this@ReaderActivity, uri.toString()))
                         twoColumns = getScopedBoolean("two_columns", false)
                     },
                     onTransition = { mode -> transition = mode; getSharedPreferences("reader_settings", MODE_PRIVATE).edit().putString("page_transition", mode).apply() },
@@ -291,7 +291,7 @@ class ReaderActivity : FragmentActivity() {
         val bookSettingsShortcut = intent.getBooleanExtra(EXTRA_BOOK_SETTINGS, false)
         customizeThisBook = bookSettingsShortcut || getSharedPreferences("reader_settings", MODE_PRIVATE).getBoolean("customize_this_book", false)
         settingsOpen = bookSettingsShortcut
-        appearance = loadReaderAppearance(this, uri.toString())
+        appearance = if (customizeThisBook) loadReaderAppearance(this, uri.toString()) else loadGlobalReaderAppearance(this)
         window.decorView.setBackgroundColor(appearance!!.background)
         root.setBackgroundColor(appearance!!.background)
         twoColumns = getScopedBoolean("two_columns", false)
@@ -321,27 +321,11 @@ class ReaderActivity : FragmentActivity() {
 
     private fun applyRotation() { requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
 
-    private fun loadGlobalReaderAppearanceForActivity(): ReaderAppearance {
-        val prefs = getSharedPreferences("reader_settings", MODE_PRIVATE)
-        return ReaderAppearance(
-            theme = prefs.getString("theme", "paper") ?: "paper",
-            background = prefs.getInt("background", AndroidColor.rgb(250,249,246)),
-            foreground = prefs.getInt("foreground", AndroidColor.rgb(43,42,39)),
-            fontFamily = prefs.getString("font_family", "") ?: "",
-            fontScale = prefs.getFloat("font_scale", 1f),
-            lineSpacing = prefs.getFloat("line_spacing", 1f).coerceIn(1f, 2f),
-            twoColumns = prefs.getBoolean("two_columns", false),
-            continuous = prefs.getBoolean("continuous", false),
-            topMarginDp = prefs.getFloat("top_margin_dp", 0f),
-            bottomMarginDp = prefs.getFloat("bottom_margin_dp", 0f),
-            columnGapDp = prefs.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f),
-        )
-    }
+    internal fun displayedReaderAppearance(): ReaderAppearance? = appearance
 
     private fun saveAppearance(value: ReaderAppearance) {
         if (!customizeThisBook) return
         val previous = appearance
-        appearance = value
         val prefs = scopedAppearancePreferences()
         val prefix = scopedAppearanceKey("")
         prefs.edit().also { editor ->
@@ -355,6 +339,11 @@ class ReaderActivity : FragmentActivity() {
             if (previous?.bottomMarginDp != value.bottomMarginDp) editor.putFloat(prefix + "bottom_margin_dp", value.bottomMarginDp)
             if (previous?.columnGapDp != value.columnGapDp) editor.putFloat(prefix + "column_gap_dp", value.columnGapDp)
         }.apply()
+        showAppearance(value)
+    }
+
+    private fun showAppearance(value: ReaderAppearance) {
+        appearance = value
         window.decorView.setBackgroundColor(value.background)
         readerRoot?.setBackgroundColor(value.background)
         (supportFragmentManager.findFragmentById(containerId) as? ReaderHostFragment)?.applyAppearance()
@@ -497,8 +486,12 @@ class ReaderHostFragment : Fragment() {
     private var totalPositions = 0
     private var progressSections = emptyList<ReaderProgressSection>()
 
+    private fun displayedAppearance(): ReaderAppearance =
+        (activity as? ReaderActivity)?.displayedReaderAppearance()
+            ?: loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+
     fun applyAppearance() {
-        val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        val appearance = displayedAppearance()
         (view as? FrameLayout)?.let { host ->
             val density = resources.displayMetrics.density
             host.setBackgroundColor(appearance.background)
@@ -757,7 +750,7 @@ class ReaderHostFragment : Fragment() {
         FrameLayout(requireContext()).also {
             containerId = READER_CONTENT_ID
             it.id = containerId
-            val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+            val appearance = displayedAppearance()
             it.setBackgroundColor(appearance.background)
             val density = resources.displayMetrics.density
             it.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
@@ -845,7 +838,7 @@ class ReaderHostFragment : Fragment() {
                 val initialLocator = parseSavedLocator(progress.getString(uri.toString(), null))
                 if (format == "EPUB") {
                     val minimumWidth = (560f * resources.displayMetrics.density).toInt()
-                    configuredMode = readerMode(loadReaderAppearance(context, uri.toString()), viewportWidthPx, viewportHeightPx, minimumWidth)
+                    configuredMode = readerMode(displayedAppearance(), viewportWidthPx, viewportHeightPx, minimumWidth)
                 }
                 clearLoading()
                 installPublication(publication, initialLocator)
@@ -859,7 +852,7 @@ class ReaderHostFragment : Fragment() {
     private fun installPublication(value: org.readium.r2.shared.publication.Publication, locator: org.readium.r2.shared.publication.Locator?) {
         pageTurnAnimator?.cancel()
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
-        val appearance = loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
+        val appearance = displayedAppearance()
         val density = resources.displayMetrics.density
         val minimumTwoColumnWidthPx = (560f * density).toInt()
         (view as? FrameLayout)?.let { host ->
@@ -925,7 +918,7 @@ class ReaderHostFragment : Fragment() {
     private fun showText(text: String) {
         val context = requireContext()
         val key = arguments?.getString(ARG_URI).orEmpty()
-        val appearance = loadReaderAppearance(context, key)
+        val appearance = displayedAppearance()
         val palette = Triple(appearance.background, appearance.foreground, AndroidColor.WHITE)
         val content = TextView(context).apply {
             this.text = text
@@ -1064,7 +1057,7 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
     return resolveReaderAppearance(global, overrides)
 }
 
-    private fun loadGlobalReaderAppearance(context: android.content.Context): ReaderAppearance {
+private fun loadGlobalReaderAppearance(context: android.content.Context): ReaderAppearance {
     val prefs = context.getSharedPreferences("reader_settings", android.content.Context.MODE_PRIVATE)
     return ReaderAppearance(
         theme = prefs.getString("theme", "paper") ?: "paper",
