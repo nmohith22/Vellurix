@@ -39,4 +39,12 @@ class ReadingProgressCheck {
         )
         assertEquals(ChapterPageProgress(5, 10), chapterPageProgress(5, 20, sections))
     }
+
+    @Test fun frontMatterDoesNotBorrowTheFirstChaptersPageCount() {
+        val sections = listOf(ReaderProgressSection("Chapter 1", .25f, firstPosition = 6))
+        assertEquals(null, chapterPageProgress(5, 20, sections))
+        assertEquals(ChapterPageProgress(1, 15), chapterPageProgress(6, 20, sections))
+        assertEquals(ChapterPageProgress(15, 15), chapterPageProgress(20, 20, sections))
+        assertEquals(null, chapterPageProgress(21, 20, sections))
+    }
 }

@@ -742,6 +742,11 @@ class ReaderHostFragment : Fragment() {
             childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFragment.createDummyFactory(PdfiumEngineProvider()) else EpubNavigatorFragment.createDummyFactory()
         }
         super.onCreate(savedInstanceState)
+        // A restored Readium placeholder cannot resume. onViewCreated reopens the book
+        // with its real navigator and the locator saved on pause.
+        childFragmentManager.findFragmentByTag("publication_reader")?.let { placeholder ->
+            childFragmentManager.commitNow { remove(placeholder) }
+        }
     }
 
     override fun onCreateView(inflater: android.view.LayoutInflater, parent: android.view.ViewGroup?, savedInstanceState: Bundle?): View =
@@ -1044,7 +1049,7 @@ internal fun loadReaderAppearance(context: android.content.Context, uri: String)
             continuous = if (bookPrefs.contains(prefix + "continuous")) bookPrefs.getBoolean(prefix + "continuous", global.continuous) else null,
         topMarginDp = if (bookPrefs.contains(prefix + "top_margin_dp")) bookPrefs.getFloat(prefix + "top_margin_dp", global.topMarginDp) else null,
         bottomMarginDp = if (bookPrefs.contains(prefix + "bottom_margin_dp")) bookPrefs.getFloat(prefix + "bottom_margin_dp", global.bottomMarginDp) else null,
-        columnGapDp = if (bookPrefs.contains(prefix + "column_gap_dp")) bookPrefs.getFloat(prefix + "column_gap_dp", global.columnGapDp).coerceIn(0f, 32f) else null,
+        columnGapDp = if (bookPrefs.contains(prefix + "column_gap_dp")) bookPrefs.getFloat(prefix + "column_gap_dp", global.columnGapDp).coerceIn(0f, MAX_COLUMN_GAP_DP) else null,
         )
     } else null
     return resolveReaderAppearance(global, overrides)
@@ -1063,7 +1068,7 @@ private fun loadGlobalReaderAppearance(context: android.content.Context): Reader
         continuous = prefs.getBoolean("continuous", false),
         topMarginDp = prefs.getFloat("top_margin_dp", 0f),
         bottomMarginDp = prefs.getFloat("bottom_margin_dp", 0f),
-        columnGapDp = prefs.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f),
+        columnGapDp = prefs.getFloat("column_gap_dp", 4f).coerceIn(0f, MAX_COLUMN_GAP_DP),
     )
 }
 
@@ -1093,12 +1098,18 @@ private fun readingPreferences(appearance: ReaderAppearance, doubleColumns: Bool
 private fun epubColumnConfiguration(gapDp: Float, doubleColumns: Boolean) =
     EpubNavigatorFragment.Configuration().apply {
         readiumCssRsProperties = if (doubleColumns) {
+            val gap = gapDp.coerceIn(0f, MAX_COLUMN_GAP_DP).toDouble()
             org.readium.r2.navigator.epub.css.RsProperties(
-                // Readium snaps by viewport width. Padding inside each column keeps that stride exact.
+                // Two column pitches must add up to one Readium viewport. Split the trailing gap
+                // between the outside edges so the inter-column gap straddles the centerline.
                 colWidth = org.readium.r2.navigator.epub.css.Length.Px(1.0),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
-                colGap = org.readium.r2.navigator.epub.css.Length.Px(0.0),
-                pageGutter = org.readium.r2.navigator.epub.css.Length.Px(gapDp.coerceIn(0f, 32f).toDouble() / 2),
+                colGap = org.readium.r2.navigator.epub.css.Length.Px(gap),
+                pageGutter = org.readium.r2.navigator.epub.css.Length.Px(0.0),
+                overrides = mapOf(
+                    "padding-inline" to "${gap / 2}px",
+                    "overflow-wrap" to "anywhere",
+                ),
             )
         } else {
             org.readium.r2.navigator.epub.css.RsProperties(colCount = org.readium.r2.navigator.epub.css.ColCount.ONE)

@@ -1,5 +1,7 @@
 package io.github.nmohith22.vellurix
 
+internal const val MAX_COLUMN_GAP_DP = 64f
+
 internal data class ReaderAppearance(
     val theme: String = "paper",
     val background: Int,

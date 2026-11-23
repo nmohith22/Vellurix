@@ -7,14 +7,19 @@ on:
       - "release/Vellurix-*.apk"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: apk-release
   cancel-in-progress: false
 
 jobs:
+  regression:
+    uses: ./.github/workflows/regression.yml
   publish:
+    needs: regression
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

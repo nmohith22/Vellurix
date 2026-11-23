@@ -35,6 +35,10 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 - The orange and black launcher book is scaled down to sit comfortably inside its icon mask. Its One UI monochrome version keeps page lines and the center spine as cutout details.
 - Scrub through a book from the reader's chapter-segmented progress seeker; it shows both book-wide and chapter-local page counts, previews the section under your finger, and navigates when released.
 
+## Development
+
+See the regression suite for JVM checks, emulator tests, and the remaining release checks. [Test guide](tests/README.md)
+
 ## License
 
 Vellurix is licensed under Apache-2.0. See [LICENSE](LICENSE).

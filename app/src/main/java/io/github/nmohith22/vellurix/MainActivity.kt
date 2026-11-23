@@ -159,7 +159,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
     var readerLineSpacing by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)) }
     var readerTopMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("top_margin_dp", 0f)) }
     var readerBottomMargin by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("bottom_margin_dp", 0f)) }
-    var readerColumnGap by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f)) }
+    var readerColumnGap by rememberSaveable { mutableFloatStateOf(readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, MAX_COLUMN_GAP_DP)) }
     var readerTwoColumns by rememberSaveable { mutableStateOf(readerSettings.getBoolean("two_columns", false)) }
     var readerContinuous by rememberSaveable { mutableStateOf(readerSettings.getBoolean("continuous", false)) }
     var fontDialog by remember { mutableStateOf(false) }
@@ -224,7 +224,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
             readerLineSpacing = readerSettings.getFloat("line_spacing", 1f).coerceIn(1f, 2f)
             readerTopMargin = readerSettings.getFloat("top_margin_dp", 0f)
             readerBottomMargin = readerSettings.getFloat("bottom_margin_dp", 0f)
-            readerColumnGap = readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, 32f)
+            readerColumnGap = readerSettings.getFloat("column_gap_dp", 4f).coerceIn(0f, MAX_COLUMN_GAP_DP)
             readerTwoColumns = readerSettings.getBoolean("two_columns", false)
             readerContinuous = readerSettings.getBoolean("continuous", false)
             customBackground = readerSettings.getInt("background", android.graphics.Color.rgb(250,249,246))
@@ -573,7 +573,7 @@ private fun FolioApp(resumeTick: Int, onBackupRestored: () -> Unit) {
                                 Text("Paginated by default. Continuous mode scrolls through long sections.", style = MaterialTheme.typography.bodySmall, color = Muted)
                                 if (readerTwoColumns && !readerContinuous) {
                                     Text("Middle column gap · ${readerColumnGap.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                                    Slider(value = readerColumnGap, onValueChange = { readerColumnGap = it }, valueRange = 0f..32f, onValueChangeFinished = { readerSettings.edit().putFloat("column_gap_dp", readerColumnGap).apply() })
+                                    Slider(value = readerColumnGap, onValueChange = { readerColumnGap = it }, valueRange = 0f..MAX_COLUMN_GAP_DP, onValueChangeFinished = { readerSettings.edit().putFloat("column_gap_dp", readerColumnGap).apply() })
                                 }
                                 Text("Top reading margin · ${readerTopMargin.toInt()} dp", style = MaterialTheme.typography.titleSmall)
                                 Slider(value = readerTopMargin, onValueChange = { readerTopMargin = it }, valueRange = 0f..80f, onValueChangeFinished = { readerSettings.edit().putFloat("top_margin_dp", readerTopMargin).apply() })
@@ -787,8 +787,9 @@ private fun loadBookProgress(context: android.content.Context, uri: String): Boo
     var position = summary.getInt("${uri}|position", 0).takeIf { it > 0 }
     val total = summary.getInt("${uri}|total", 0).takeIf { it > 0 }
     if (fraction < 0f) {
-        val saved = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE).getString(uri, null)
         runCatching {
+            // Flowing text stores a scroll offset in the same preferences as Readium locators.
+            val saved = context.getSharedPreferences("reading_progress", android.content.Context.MODE_PRIVATE).getString(uri, null)
             val locations = JSONObject(saved).getJSONObject("locations")
             fraction = locations.optDouble("totalProgression", -1.0).toFloat()
             position = locations.optInt("position", 0).takeIf { it > 0 }

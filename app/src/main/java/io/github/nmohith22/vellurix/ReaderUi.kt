@@ -380,7 +380,7 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                                 value = appearance.columnGapDp,
                                 onValueChange = { appearance = appearance.copy(columnGapDp = it) },
                                 onValueChangeFinished = { onAppearance(appearance) },
-                                valueRange = 0f..32f,
+                                valueRange = 0f..MAX_COLUMN_GAP_DP,
                                 enabled = customizeBook,
                             )
                         }

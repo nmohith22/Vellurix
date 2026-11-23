@@ -22,4 +22,11 @@ class ReaderNavigationCheck {
         assertEquals(1, adjacentReadingOrderIndex("Text/chapter1.xhtml#part-two", listOf("Text/chapter1.xhtml", "Text/chapter2.xhtml"), true))
         assertEquals(0, adjacentReadingOrderIndex("Text/chapter2.xhtml", listOf("Text/chapter1.xhtml", "Text/chapter2.xhtml"), false))
     }
+
+    @Test fun neverWrapsFromLastChapterToFirstOrJumpsForAnUnknownResource() {
+        val spine = listOf("first.xhtml", "second.xhtml", "last.xhtml")
+        assertEquals(null, adjacentReadingOrderIndex("first.xhtml", spine, forward = false))
+        assertEquals(null, adjacentReadingOrderIndex("last.xhtml", spine, forward = true))
+        assertEquals(null, adjacentReadingOrderIndex("toc.xhtml", spine, forward = true))
+    }
 }
