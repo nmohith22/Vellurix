@@ -33,8 +33,10 @@ class ReaderAppearanceCheck {
     @Test fun columnsFollowViewportAspectAndKeepLandscapeSingleColumnAvailable() {
         assertEquals(false, usesTwoColumns(true, false, 800, 1200))
         assertEquals(true, usesTwoColumns(true, false, 1200, 800))
-        assertEquals(true, usesTwoColumns(true, false, 1800, 2200, minimumTwoColumnWidthPx = 1800))
-        assertEquals(false, usesTwoColumns(true, false, 1080, 2200, minimumTwoColumnWidthPx = 1800))
+        assertEquals(false, usesTwoColumns(true, false, 1800, 2200))
+        assertEquals(true, usesTwoColumns(true, false, 2200, 1800))
+        assertEquals(false, usesTwoColumns(true, false, 1800, 1800))
+        assertEquals(false, usesTwoColumns(true, false, 1800, 0))
         assertEquals(false, usesTwoColumns(false, false, 1200, 800))
         assertEquals(false, usesTwoColumns(true, true, 1200, 800))
     }

@@ -15,7 +15,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -194,7 +193,7 @@ internal fun ReaderOverlay(
                 ) {
                     Column {
                         Box(Modifier.padding(horizontal = 12.dp)) {
-                            ReaderProgressSeeker(progress, fg, accent, onSeek)
+                            ReaderProgressSeeker(progress, fg, panel, accent, onSeek)
                         }
                         ReaderToolbar(
                             themesOpen = themeCarousel && customizeBook, customizeBook = customizeBook,
@@ -319,19 +318,9 @@ private fun ReaderToolbar(
                 val scroll = if (maxWidth < 288.dp) Modifier.horizontalScroll(rememberScrollState()) else Modifier
                 Row(Modifier.fillMaxSize().then(scroll), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
                     IconButton(onClick = { onTurn(false) }) { Icon(Icons.Rounded.KeyboardArrowLeft, "Previous page", tint = foreground) }
-                    val preset = readerThemePresets.firstOrNull { it.id == theme }
                     IconButton(enabled = customizeBook, onClick = { onThemesOpen(true) }) {
-                        if (preset == null) Icon(Icons.Rounded.ColorLens, "Custom reading theme", tint = foreground.copy(alpha = if (customizeBook) 1f else .38f))
-                        else {
-                            Box(
-                                Modifier.size(26.dp).clip(CircleShape).background(Color(preset.background))
-                                    .border(1.dp, foreground.copy(alpha = .35f), CircleShape)
-                                    .semantics { contentDescription = "Reading theme: ${preset.name}" },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("Aa", color = Color(preset.foreground), style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
+                        val name = readerThemePresets.firstOrNull { it.id == theme }?.name ?: "Custom"
+                        Icon(Icons.Rounded.ColorLens, "Reading theme: $name", tint = foreground.copy(alpha = if (customizeBook) 1f else .38f))
                     }
                     FilledTonalIconToggleButton(
                         checked = autoRotate, onCheckedChange = { onRotate() },
@@ -456,7 +445,7 @@ private fun ReaderAppearancePreview(appearance: ReaderAppearance) {
 }
 
 @Composable
-private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, accent: Color, onSeek: (Float) -> Unit) {
+private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, panel: Color, accent: Color, onSeek: (Float) -> Unit) {
     var dragging by remember { mutableStateOf(false) }
     var fingerProgress by remember { mutableFloatStateOf(progress.fraction.coerceIn(0f, 1f)) }
     val scope = rememberCoroutineScope()
@@ -468,14 +457,14 @@ private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, 
     val counterStyle = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")
     Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 2.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("${page ?: "—"} / ${progress.total ?: "—"}", color = foreground.copy(alpha = .82f), style = counterStyle)
-            Text("${(position * 100).toInt()}%", color = foreground.copy(alpha = .82f), style = counterStyle)
+            Text("Book · ${page ?: "—"} / ${progress.total ?: "—"}", color = foreground, style = counterStyle, fontWeight = FontWeight.SemiBold)
+            Text("${(position * 100).toInt()}%", color = foreground, style = counterStyle)
         }
-        Row(Modifier.fillMaxWidth()) {
+        if (chapterProgress != null) {
             Text(
-                "Chapter · ${chapterProgress?.page ?: "—"} / ${chapterProgress?.total ?: "—"}",
-                color = foreground.copy(alpha = .74f),
-                style = counterStyle.copy(fontSize = 9.sp),
+                "Chapter · ${chapterProgress.page} / ${chapterProgress.total}",
+                color = foreground.copy(alpha = .85f),
+                style = counterStyle,
             )
         }
         BoxWithConstraints(Modifier.fillMaxWidth().height(42.dp)) {
@@ -538,13 +527,17 @@ private fun ReaderProgressSeeker(progress: ReaderProgressUi, foreground: Color, 
             }
             if (dragging && section != null) {
                 val title = progress.sections.getOrNull(section)?.title?.takeIf(String::isNotBlank) ?: "Section ${section + 1}"
+                val previewWidth = minOf(currentWidth, 184.dp)
                 Surface(
-                    modifier = Modifier.align(Alignment.TopStart).offset(x = (currentWidth * position - 82.dp).coerceIn(0.dp, (currentWidth - 164.dp).coerceAtLeast(0.dp))),
-                    shape = RoundedCornerShape(9.dp), color = foreground.copy(alpha = .92f),
+                    modifier = Modifier.align(Alignment.TopStart).offset(x = (currentWidth * position - previewWidth / 2).coerceIn(0.dp, currentWidth - previewWidth)).width(previewWidth),
+                    shape = RoundedCornerShape(10.dp),
+                    color = panel,
+                    shadowElevation = 4.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, foreground.copy(alpha = .2f)),
                 ) {
                     Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
-                        Text("${section + 1}. $title", color = if (foreground.luminance() < .5f) Color.White else Color(0xFF202020), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("Page ${page ?: "—"}", color = if (foreground.luminance() < .5f) Color.LightGray else Color(0xFF666666), style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp))
+                        Text(title, color = foreground, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Book page ${page ?: "—"}", color = foreground.copy(alpha = .85f), style = counterStyle)
                     }
                 }
             }

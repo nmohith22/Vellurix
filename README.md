@@ -4,7 +4,7 @@ An offline-first Android reader for EPUB, PDF, TXT, HTML, FB2, and basic RTF. It
 
 ## Download
 
-**[Download Vellurix 0.1.26 for Android](https://github.com/nmohith22/Vellurix/releases/download/v0.1.26/Vellurix-0.1.26.apk)** · [View release notes and other downloads](https://github.com/nmohith22/Vellurix/releases)
+**[Download Vellurix 0.1.27 for Android](https://github.com/nmohith22/Vellurix/releases/download/v0.1.27/Vellurix-0.1.27.apk)** · [View release notes and other downloads](https://github.com/nmohith22/Vellurix/releases)
 
 Download the APK on your Android device, open it from Downloads, and follow Android's install prompt. Install it over your existing Vellurix app without uninstalling first to keep its local library, shelves, settings, widgets, and reading progress. Android may ask you to allow your browser or file manager to install apps from that source.
 
@@ -28,7 +28,7 @@ Download the APK on your Android device, open it from Downloads, and follow Andr
 - Let the library discover new files when it opens, or run **Populate from folder** in Settings. Removed books stay excluded from scans; import a removed book explicitly to add it back. Create shelves and add book or shelf widgets to the home screen.
 - Open library search from the top bar; the field expands on demand and collapses when cleared.
 - Shelves sit above the books on compact screens and beside them on wide screens. On a wide reader, settings sit beside the live page. Compact reader settings show a sample preview.
-- Wide inner screens support double-column reading independent of orientation. The reader hides system bars and reveals them temporarily on a swipe.
+- With Double selected, EPUBs use two columns when the reader is wider than it is tall. The reader hides system bars and reveals them temporarily on a swipe.
 - Book and shelf widgets show book covers, resize with the launcher, and open the selected book when tapped. The picker shows cover previews and keeps clear of display cutouts.
 - Swipe horizontally through every book in a shelf widget; each book tile shows only its cover, and tapping it opens that book.
 - Export and import JSON backups for reading positions, bookmarks, shelves, library settings, and reader customization. Backups map existing EPUB/PDF files by content hash and do not contain book files; add those books to the library before restoring on another device.

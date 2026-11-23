@@ -73,8 +73,7 @@ internal fun usesTwoColumns(
     continuous: Boolean,
     widthPx: Int,
     heightPx: Int,
-    minimumTwoColumnWidthPx: Int = Int.MAX_VALUE,
-): Boolean = preferred && !continuous && (widthPx > heightPx || widthPx >= minimumTwoColumnWidthPx)
+): Boolean = preferred && !continuous && heightPx > 0 && widthPx > heightPx
 
 internal fun readerUsesDarkCanvas(background: Int): Boolean {
     val red = background shr 16 and 255

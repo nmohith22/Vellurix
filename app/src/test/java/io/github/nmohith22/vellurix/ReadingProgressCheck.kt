@@ -19,10 +19,15 @@ class ReadingProgressCheck {
 
     @Test fun seekerShowsChapterLocalPageCount() {
         val sections = listOf(
-            ReaderProgressSection("Opening", 0f, firstPosition = 1, lastPosition = 10),
-            ReaderProgressSection("Middle", .35f, firstPosition = 11, lastPosition = 30),
+            ReaderProgressSection("Opening", 0f, firstPosition = 1),
+            ReaderProgressSection("Middle", .68f, firstPosition = 11),
+            ReaderProgressSection("End", .94f, firstPosition = 31),
         )
-        assertEquals(ChapterPageProgress(8, 20), chapterPageProgress(18, 30, sections))
+        assertEquals(ChapterPageProgress(10, 10), chapterPageProgress(10, 40, sections))
+        assertEquals(ChapterPageProgress(1, 20), chapterPageProgress(11, 40, sections))
+        assertEquals(ChapterPageProgress(8, 20), chapterPageProgress(18, 40, sections))
+        assertEquals(ChapterPageProgress(20, 20), chapterPageProgress(30, 40, sections))
+        assertEquals(ChapterPageProgress(1, 10), chapterPageProgress(31, 40, sections))
         assertEquals(null, chapterPageProgress(null, 100, sections))
     }
 
