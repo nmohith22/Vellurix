@@ -376,7 +376,13 @@ private fun ReaderSettingsDialog(current: ReaderAppearance, customizeBook: Boole
                         if (supportsTwoColumns) { Text("Page layout", style = MaterialTheme.typography.titleSmall); Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("single" to "Single", "double" to "Double", "continuous" to "Continuous").forEach { (mode, label) -> val selected = when (mode) { "double" -> appearance.twoColumns && !appearance.continuous; "continuous" -> appearance.continuous; else -> !appearance.twoColumns && !appearance.continuous }; FilterChip(selected = selected, onClick = { onReadingMode(mode) }, enabled = customizeBook, label = { Text(label) }) } }; Text("Paginated by default. Continuous mode scrolls through a long section.", style = MaterialTheme.typography.bodySmall) }
                         if (supportsTwoColumns && appearance.twoColumns && !appearance.continuous) {
                             Text("Middle column gap · ${appearance.columnGapDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
-                            Slider(value = appearance.columnGapDp, onValueChange = { appearance = appearance.copy(columnGapDp = it); onAppearance(appearance) }, valueRange = 0f..32f, enabled = customizeBook)
+                            Slider(
+                                value = appearance.columnGapDp,
+                                onValueChange = { appearance = appearance.copy(columnGapDp = it) },
+                                onValueChangeFinished = { onAppearance(appearance) },
+                                valueRange = 0f..32f,
+                                enabled = customizeBook,
+                            )
                         }
                         Text("Top margin · ${appearance.topMarginDp.toInt()} dp", style = MaterialTheme.typography.titleSmall)
                         Slider(value = appearance.topMarginDp, onValueChange = { appearance = appearance.copy(topMarginDp = it); onAppearance(appearance) }, valueRange = 0f..80f, enabled = customizeBook)

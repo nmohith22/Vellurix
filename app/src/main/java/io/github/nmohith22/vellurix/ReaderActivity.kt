@@ -479,15 +479,19 @@ class ReaderHostFragment : Fragment() {
         (activity as? ReaderActivity)?.displayedReaderAppearance()
             ?: loadReaderAppearance(requireContext(), arguments?.getString(ARG_URI).orEmpty())
 
+    private fun updateReaderMargins(host: View, appearance: ReaderAppearance, insetSpread: Boolean) {
+        val density = resources.displayMetrics.density
+        val edge = if (insetSpread) (20 * density).toInt() else 0
+        host.setBackgroundColor(appearance.background)
+        host.setPadding(edge, (appearance.topMarginDp * density).toInt(), edge, (appearance.bottomMarginDp * density).toInt())
+    }
+
     fun applyAppearance() {
         val appearance = displayedAppearance()
-        (view as? FrameLayout)?.let { host ->
-            val density = resources.displayMetrics.density
-            host.setBackgroundColor(appearance.background)
-            host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
-            host.clipToPadding = true
-        }
-        when (arguments?.getString(ARG_FORMAT).orEmpty()) {
+        val format = arguments?.getString(ARG_FORMAT).orEmpty()
+        val mode = readerMode(appearance, viewportWidthPx, viewportHeightPx)
+        view?.let { updateReaderMargins(it, appearance, format == "EPUB" && mode == "double" && reflowablePublication()) }
+        when (format) {
             "TXT", "HTML", "HTM", "FB2", "RTF" -> {
                 flowingScroll?.setBackgroundColor(appearance.background)
                 flowingText?.apply {
@@ -498,14 +502,13 @@ class ReaderHostFragment : Fragment() {
                 }
             }
             "EPUB" -> {
-                val desiredMode = readerMode(appearance, viewportWidthPx, viewportHeightPx)
                 val book = publication
-                val gapChanged = desiredMode == "double" && configuredColumnGapDp != appearance.columnGapDp
-                if (book != null && (configuredMode != desiredMode || gapChanged)) {
+                val gapChanged = mode == "double" && reflowablePublication() && configuredColumnGapDp != appearance.columnGapDp
+                if (book != null && (configuredMode != mode || gapChanged)) {
                     val locator = currentLocator() ?: lastSavedLocator()
                     installPublication(book, locator)
                 } else {
-                    val preferences = readingPreferences(appearance, desiredMode == "double")
+                    val preferences = readingPreferences(appearance, mode == "double")
                     if (preferences != submittedPreferences) {
                         val navigator = childFragmentManager.findFragmentByTag("publication_reader") as? EpubNavigatorFragment
                         navigator?.submitPreferences(preferences)
@@ -521,6 +524,9 @@ class ReaderHostFragment : Fragment() {
             }
         }
     }
+
+    private fun reflowablePublication(): Boolean =
+        publication?.metadata?.layout != org.readium.r2.shared.publication.Layout.FIXED
 
     fun turnPage(forward: Boolean) {
         if (turningPage) {
@@ -742,10 +748,7 @@ class ReaderHostFragment : Fragment() {
         FrameLayout(requireContext()).also {
             containerId = READER_CONTENT_ID
             it.id = containerId
-            val appearance = displayedAppearance()
-            it.setBackgroundColor(appearance.background)
-            val density = resources.displayMetrics.density
-            it.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
+            updateReaderMargins(it, displayedAppearance(), insetSpread = false)
             it.clipToPadding = true
         }
 
@@ -845,14 +848,10 @@ class ReaderHostFragment : Fragment() {
         pageTurnAnimator?.cancel()
         val format = arguments?.getString(ARG_FORMAT).orEmpty()
         val appearance = displayedAppearance()
-        val density = resources.displayMetrics.density
         val mode = readerMode(appearance, viewportWidthPx, viewportHeightPx)
         val doubleColumns = mode == "double"
         val preferences = if (format == "EPUB") readingPreferences(appearance, doubleColumns) else null
-        (view as? FrameLayout)?.let { host ->
-            host.setPadding(0, (appearance.topMarginDp * density).toInt(), 0, (appearance.bottomMarginDp * density).toInt())
-            host.clipToPadding = true
-        }
+        view?.let { updateReaderMargins(it, appearance, format == "EPUB" && doubleColumns && reflowablePublication()) }
         childFragmentManager.fragmentFactory = if (format == "PDF") PdfNavigatorFactory(value, PdfiumEngineProvider()).createFragmentFactory(initialLocator = locator)
         else EpubNavigatorFactory(value).createFragmentFactory(
             initialLocator = locator,
@@ -1095,10 +1094,11 @@ private fun epubColumnConfiguration(gapDp: Float, doubleColumns: Boolean) =
     EpubNavigatorFragment.Configuration().apply {
         readiumCssRsProperties = if (doubleColumns) {
             org.readium.r2.navigator.epub.css.RsProperties(
-                // CSS treats column-width as a minimum. Let column-count divide the usable width.
+                // Readium snaps by viewport width. Padding inside each column keeps that stride exact.
                 colWidth = org.readium.r2.navigator.epub.css.Length.Px(1.0),
                 colCount = org.readium.r2.navigator.epub.css.ColCount.TWO,
-                colGap = org.readium.r2.navigator.epub.css.Length.Px(gapDp.coerceIn(0f, 32f).toDouble()),
+                colGap = org.readium.r2.navigator.epub.css.Length.Px(0.0),
+                pageGutter = org.readium.r2.navigator.epub.css.Length.Px(gapDp.coerceIn(0f, 32f).toDouble() / 2),
             )
         } else {
             org.readium.r2.navigator.epub.css.RsProperties(colCount = org.readium.r2.navigator.epub.css.ColCount.ONE)
