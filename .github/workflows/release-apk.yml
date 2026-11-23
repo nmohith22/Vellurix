@@ -1,6 +1,12 @@
 name: Publish APK release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of an existing APK to publish after regression checks
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
@@ -30,8 +36,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUSH_SHA: ${{ github.sha }}
           BEFORE_SHA: ${{ github.event.before }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          mapfile -t apks < <(git diff --name-only --diff-filter=AMR "$BEFORE_SHA" "$PUSH_SHA" -- 'release/Vellurix-*.apk')
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+            apks=("release/Vellurix-$REQUESTED_VERSION.apk")
+            [[ -f "${apks[0]}" ]] || exit 1
+            PUSH_SHA="$(git log -1 --format=%H -- "${apks[0]}")"
+          else
+            mapfile -t apks < <(git diff --name-only --diff-filter=AMR "$BEFORE_SHA" "$PUSH_SHA" -- 'release/Vellurix-*.apk')
+          fi
           if (( ${#apks[@]} == 0 )); then
             echo "No versioned Vellurix APK was changed in this commit."
             exit 0

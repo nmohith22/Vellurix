@@ -37,10 +37,23 @@ class Device:
         self.find("Library")
 
     def nodes(self):
-        if "dumped to:" not in self.shell("uiautomator", "dump", f"{self.remote}/window.xml"):
-            raise ElementTree.ParseError("UI hierarchy was not ready")
-        xml = self.adb("exec-out", "cat", f"{self.remote}/window.xml")
-        return list(ElementTree.fromstring(xml).iter("node"))
+        for _ in range(4):
+            if "dumped to:" in self.shell("uiautomator", "dump", f"{self.remote}/window.xml"):
+                xml = self.adb("exec-out", "cat", f"{self.remote}/window.xml")
+                return list(ElementTree.fromstring(xml).iter("node"))
+        raise ElementTree.ParseError("UI hierarchy was not ready")
+
+    def type_text(self, text):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if any(n.get("class") == "android.widget.EditText" and n.get("focused") == "true"
+                   for n in self.nodes()):
+                break
+        else:
+            raise AssertionError("Expected a focused text field")
+        for char in text:
+            self.shell("input", "text", "%s" if char == " " else char)
+            time.sleep(.08)
 
     def find(self, label, timeout=15, condition=lambda _: True):
         deadline = time.monotonic() + timeout
@@ -162,21 +175,21 @@ class TrackerRegression(unittest.TestCase):
         self.assertEqual(self.d.screenshot().getpixel(((x1+x2)//2, (y1+y2)//2)), (44, 135, 100))
 
         self.d.tap("Search your library")
-        self.d.shell("input", "text", "no-match")
+        self.d.type_text("no-match")
         self.d.find("No matching books")
         self.d.tap("Close search")
         self.d.find("Regression Reader")
 
         self.d.tap("New shelf")
         self.d.tap("Shelf name")
-        self.d.shell("input", "text", "Travel")
+        self.d.type_text("Travel")
         self.d.tap("Create")
         self.d.find("This shelf is empty")
         self.d.tap("Travel", hold=True)
         self.d.find("Rename shelf")
         self.d.tap("Travel")
         self.d.shell("input", "keyevent", "KEYCODE_MOVE_END")
-        self.d.shell("input", "text", "Notes")
+        self.d.type_text("Notes")
         self.d.tap("Rename")
         self.d.resize(700, 820)
         self.d.find("Shelves")
@@ -345,7 +358,7 @@ class TrackerRegression(unittest.TestCase):
         ):
             with self.subTest(extension=extension):
                 title = f"Format {extension}"
-                self.d.shell("input", "text", title.replace(" ", "%s"))
+                self.d.type_text(title)
                 self.d.tap_node(self.d.find(title, condition=lambda n: n.get("class") != "android.widget.EditText"))
                 if body:
                     self.d.find(re.compile(rf"(?s).*{body}.*"))
@@ -372,7 +385,7 @@ class TrackerRegression(unittest.TestCase):
         """Tracker folder behavior: discovery on resume and persistent exclusions."""
         self.d.populate_fixtures()
         self.d.tap("Search your library")
-        self.d.shell("input", "text", "Format%sTXT")
+        self.d.type_text("Format TXT")
         title = self.d.find("Format TXT", condition=lambda n: n.get("class") != "android.widget.EditText")
         self.d.tap_node(title, hold=True)
         self.d.tap("Remove")
@@ -384,11 +397,11 @@ class TrackerRegression(unittest.TestCase):
         self.d.shell("am", "force-stop", PACKAGE)
         self.d.open_library()
         self.d.tap("Search your library")
-        self.d.shell("input", "text", "New%sarrival")
+        self.d.type_text("New arrival")
         self.d.find("New arrival", condition=lambda n: n.get("class") != "android.widget.EditText")
         self.d.tap("Close search")
         self.d.tap("Search your library")
-        self.d.shell("input", "text", "Format%sTXT")
+        self.d.type_text("Format TXT")
         self.d.find("No matching books")
 
         self.d.tap("Settings")
